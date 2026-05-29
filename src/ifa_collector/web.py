@@ -251,9 +251,6 @@ INDEX_HTML = """<!doctype html>
           <button id="topoAdd" class="primary">Add</button>
         </div>
         <div style="padding: 0 14px 12px;">
-          <label for="topoDevices">Credential targets</label>
-          <textarea id="topoDevices" autocomplete="off" spellcheck="false" placeholder="10.101.110.1,admin,admin&#10;10.101.110.2,admin,admin"></textarea>
-          <div class="status" style="padding: 6px 0 0;">One device per line. Used for this scan only; not saved by the app.</div>
           <button id="topoClear" class="secondary" style="margin-top: 8px;">Clear</button>
           <div id="topoDeviceRows" class="device-list"></div>
         </div>
@@ -303,7 +300,7 @@ INDEX_HTML = """<!doctype html>
     </section>
   </main>
   <script>
-    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null };
+    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null, topologyTargets: [] };
 
     async function api(path, options) {
       const res = await fetch(path, options);
@@ -418,7 +415,7 @@ INDEX_HTML = """<!doctype html>
       const status = document.getElementById('topologyStatus');
       status.textContent = 'Scanning topology...';
       const body = {
-        credential_targets: credentialTargetSpecs('topoDevices')
+        credential_targets: state.topologyTargets
       };
       if (!body.credential_targets.length) {
         status.textContent = 'Add at least one credential target before scanning.';
@@ -437,15 +434,14 @@ INDEX_HTML = """<!doctype html>
         return {host: parts[0]?.trim(), username: parts[1]?.trim(), password: parts.slice(2).join(',').trim()};
       }).filter(item => item.host && item.username && item.password);
     }
-    function credentialTargetSpecs(textareaId) {
-      return deviceLines(textareaId).map(item => ({targets: item.host, username: item.username, password: item.password}))
-        .filter(item => item.targets && item.username && item.password);
-    }
     function deviceLines(textareaId) {
       return String(document.getElementById(textareaId).value || '').split(/\\r?\\n/).map(line => {
         const parts = line.split(',');
         return {host: (parts[0] || '').trim(), username: (parts[1] || '').trim(), password: parts.slice(2).join(',').trim()};
       }).filter(item => item.host || item.username || item.password);
+    }
+    function splitTargets(text) {
+      return String(text || '').split(/[\\s,]+/).map(item => item.trim()).filter(Boolean);
     }
     function addTopologyTarget() {
       const target = document.getElementById('topoTargets').value.trim();
@@ -455,14 +451,13 @@ INDEX_HTML = """<!doctype html>
         document.getElementById('topologyStatus').textContent = 'Enter targets, username, and password before Add.';
         return;
       }
-      const rows = deviceLines('topoDevices');
-      rows.push({host: target, username, password});
-      writeDeviceLines('topoDevices', rows);
-      renderDeviceRows('topoDevices', 'topoDeviceRows');
+      const targets = splitTargets(target);
+      targets.forEach(item => state.topologyTargets.push({targets: item, username, password}));
+      renderTopologyTargetRows();
       document.getElementById('topoTargets').value = '';
       document.getElementById('topoUser').value = '';
       document.getElementById('topoPass').value = '';
-      document.getElementById('topologyStatus').textContent = `${rows.length} credential targets ready.`;
+      document.getElementById('topologyStatus').textContent = `${state.topologyTargets.length} targets ready.`;
     }
     function writeDeviceLines(textareaId, rows) {
       document.getElementById(textareaId).value = rows.map(row => `${row.host || ''},${row.username || ''},${row.password || ''}`).join('\\n');
@@ -494,6 +489,31 @@ INDEX_HTML = """<!doctype html>
           updated.splice(Number(button.dataset.deviceDelete), 1);
           writeDeviceLines(textareaId, updated);
           renderDeviceRows(textareaId, containerId);
+        });
+      });
+    }
+    function renderTopologyTargetRows() {
+      const container = document.getElementById('topoDeviceRows');
+      if (!state.topologyTargets.length) {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML = table(['Targets', 'Username', 'Password', ''], state.topologyTargets.map((row, i) => `<tr>
+        <td><input data-topology-row="${i}" data-topology-field="targets" value="${esc(row.targets)}"></td>
+        <td><input data-topology-row="${i}" data-topology-field="username" value="${esc(row.username)}"></td>
+        <td><input data-topology-row="${i}" data-topology-field="password" type="password" value="${esc(row.password)}"></td>
+        <td><button class="mini" data-topology-delete="${i}">Delete</button></td>
+      </tr>`));
+      container.querySelectorAll('input[data-topology-row]').forEach(input => {
+        input.addEventListener('input', () => {
+          state.topologyTargets[Number(input.dataset.topologyRow)][input.dataset.topologyField] = input.value;
+        });
+      });
+      container.querySelectorAll('button[data-topology-delete]').forEach(button => {
+        button.addEventListener('click', () => {
+          state.topologyTargets.splice(Number(button.dataset.topologyDelete), 1);
+          renderTopologyTargetRows();
+          document.getElementById('topologyStatus').textContent = `${state.topologyTargets.length} targets ready.`;
         });
       });
     }
@@ -618,12 +638,11 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('topoTargets').value = '';
       document.getElementById('topoUser').value = '';
       document.getElementById('topoPass').value = '';
-      document.getElementById('topoDevices').value = '';
-      renderDeviceRows('topoDevices', 'topoDeviceRows');
+      state.topologyTargets = [];
+      renderTopologyTargetRows();
       state.topology = { graph: { nodes: [], links: [] }, summary: {}, errors: [] };
       renderTopology();
     });
-    document.getElementById('topoDevices').addEventListener('input', () => renderDeviceRows('topoDevices', 'topoDeviceRows'));
     document.getElementById('topoScan').addEventListener('click', () => scanTopology().catch(err => {
       document.getElementById('topologyStatus').textContent = err.message || String(err);
     }));
@@ -636,7 +655,7 @@ INDEX_HTML = """<!doctype html>
     });
     document.getElementById('tamDevices').addEventListener('input', () => renderDeviceRows('tamDevices', 'tamDeviceRows'));
     document.getElementById('tamConfigSpec').value = JSON.stringify(defaultTamSpec(), null, 2);
-    renderDeviceRows('topoDevices', 'topoDeviceRows');
+    renderTopologyTargetRows();
     renderDeviceRows('tamDevices', 'tamDeviceRows');
     document.getElementById('tamPreview').addEventListener('click', () => previewTam().catch(err => {
       document.getElementById('tamPlan').textContent = err.message || String(err);
