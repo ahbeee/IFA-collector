@@ -351,12 +351,6 @@ INDEX_HTML = """<!doctype html>
               <div><label for="tamFgProtocol">Protocol</label><select id="tamFgProtocol"><option value="">Any</option><option>UDP</option><option>TCP</option></select></div>
               <div><label for="tamFgSrcIp">SRC IP</label><input id="tamFgSrcIp" placeholder="1.1.1.1/32"></div>
               <div><label for="tamFgDstIp">DST IP</label><input id="tamFgDstIp" placeholder="4.4.4.4/32"></div>
-              <div><label for="tamFgSrcIpv6">SRC IPv6</label><input id="tamFgSrcIpv6" placeholder="2100::1/64"></div>
-              <div><label for="tamFgDstIpv6">DST IPv6</label><input id="tamFgDstIpv6" placeholder="2100::2/64"></div>
-              <div><label for="tamFgSrcMac">SRC MAC</label><input id="tamFgSrcMac" placeholder="AA:BB:CC:11:22:33"></div>
-              <div><label for="tamFgDstMac">DST MAC</label><input id="tamFgDstMac" placeholder="AA:BB:CC:11:22:44"></div>
-              <div><label for="tamFgVlan">VLAN</label><input id="tamFgVlan" type="number"></div>
-              <div><label for="tamFgEthertype">Ethertype</label><select id="tamFgEthertype"><option value="">Any</option><option>ARP</option><option>IP</option><option>IPV6</option><option>LLDP</option><option>MPLS</option><option>ROCE</option><option>VLAN</option></select></div>
               <div><label for="tamFgSrcPort">SRC L4 Port</label><input id="tamFgSrcPort" type="number"></div>
               <div><label for="tamFgDstPort">DST L4 Port</label><input id="tamFgDstPort" type="number"></div>
               <button id="tamAddFlowgroup" class="secondary">Queue Add</button>
@@ -378,7 +372,7 @@ INDEX_HTML = """<!doctype html>
           <button id="tamApply" class="primary" style="margin-top: 8px;">Apply</button>
           <button id="tamClearPending" class="secondary" style="margin-top: 8px;">Clear Pending</button>
         </div>
-        <pre id="tamPending">No pending changes.</pre>
+        <pre id="tamPending">{}</pre>
         <pre id="tamPlan">{}</pre>
       </div>
     </section>
@@ -388,7 +382,7 @@ INDEX_HTML = """<!doctype html>
     </section>
   </main>
   <script>
-    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null, devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [] };
+    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null, devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec() };
 
     async function api(path, options) {
       const res = await fetch(path, options);
@@ -729,19 +723,13 @@ INDEX_HTML = """<!doctype html>
       setOptions('tamSessionSampler', namesFor('samplers'), 'None');
     }
     function renderPendingTamSpec() {
-      const text = state.tamTasks.length
-        ? state.tamTasks.map(task => `${task.message}${task.status ? ` [${task.status}]` : ''}${task.error ? ` ${task.error}` : ''}`).join('\n')
-        : 'No pending changes.';
-      document.getElementById('tamPending').textContent = text;
+      const spec = configSpec();
+      document.getElementById('tamPending').textContent = JSON.stringify(spec, null, 2);
     }
     function queueMessage(message) {
       document.getElementById('tamPlan').textContent = message;
       renderTamForms();
       renderPendingTamSpec();
-    }
-    function queueTask(message, description) {
-      state.tamTasks.push({message, description, status: ''});
-      queueMessage(message);
     }
     function addOrReplace(list, item) {
       const index = list.findIndex(row => row.name === item.name);
@@ -754,30 +742,17 @@ INDEX_HTML = """<!doctype html>
     }
     function queueSelectedDeletes(kind) {
       const selected = [...document.querySelectorAll(`input[data-tam-delete="${kind}"]:checked`)].map(input => input.value);
-      selected.forEach(name => {
-        addDelete(kind, name);
-        const singular = kind === 'sessions' ? 'IFA session' : kind.slice(0, -1);
-        queueTask(`Queued ${singular} ${name} delete operation.`, `delete ${singular} ${name}`);
-      });
+      selected.forEach(name => addDelete(kind, name));
       queueMessage(selected.length ? `Queued ${selected.length} ${kind} delete operation(s).` : `Select ${kind} rows before queueing delete.`);
     }
     function queueSwitchConfig() {
       const switchId = document.getElementById('tamSwitchId').value.trim();
       const enterpriseId = document.getElementById('tamEnterpriseId').value.trim();
       const ifaStatus = document.getElementById('tamIfaStatus').value;
-      if (switchId) {
-        state.tamSpec.switch.switch_id = Number(switchId);
-        queueTask('Queued switch-id setting.', 'set switch-id');
-      }
-      if (enterpriseId) {
-        state.tamSpec.switch.enterprise_id = Number(enterpriseId);
-        queueTask('Queued enterprise-id setting.', 'set enterprise-id');
-      }
-      if (ifaStatus) {
-        state.tamSpec.ifa_status = ifaStatus;
-        queueTask(`Queued IFA ${ifaStatus} setting.`, `set IFA ${ifaStatus}`);
-      }
-      if (!switchId && !enterpriseId && !ifaStatus) queueMessage('Enter switch settings before queueing.');
+      if (switchId) state.tamSpec.switch.switch_id = Number(switchId);
+      if (enterpriseId) state.tamSpec.switch.enterprise_id = Number(enterpriseId);
+      if (ifaStatus) state.tamSpec.ifa_status = ifaStatus;
+      queueMessage('Queued switch settings.');
     }
     function queueCollector() {
       const item = {
@@ -789,7 +764,7 @@ INDEX_HTML = """<!doctype html>
       };
       if (!item.name || !item.ip || !item.port) return queueMessage('Collector needs name, IP, and port.');
       addOrReplace(state.tamSpec.collectors, item);
-      queueTask(`Queued collector ${item.name}.`, `set collector ${item.name}`);
+      queueMessage(`Queued collector ${item.name}.`);
     }
     function queueSampler() {
       const item = {
@@ -798,7 +773,7 @@ INDEX_HTML = """<!doctype html>
       };
       if (!item.name || !item.sampling_rate) return queueMessage('Sampler needs name and sampling rate.');
       addOrReplace(state.tamSpec.samplers, item);
-      queueTask(`Queued sampler ${item.name}.`, `set sampler ${item.name}`);
+      queueMessage(`Queued sampler ${item.name}.`);
     }
     function queueFlowgroup() {
       const item = {
@@ -807,19 +782,13 @@ INDEX_HTML = """<!doctype html>
         priority: Number(document.getElementById('tamFgPriority').value || 100),
         src_ip: document.getElementById('tamFgSrcIp').value.trim() || undefined,
         dst_ip: document.getElementById('tamFgDstIp').value.trim() || undefined,
-        src_ipv6: document.getElementById('tamFgSrcIpv6').value.trim() || undefined,
-        dst_ipv6: document.getElementById('tamFgDstIpv6').value.trim() || undefined,
-        src_mac: document.getElementById('tamFgSrcMac').value.trim() || undefined,
-        dst_mac: document.getElementById('tamFgDstMac').value.trim() || undefined,
-        vlan: document.getElementById('tamFgVlan').value ? Number(document.getElementById('tamFgVlan').value) : undefined,
-        ethertype: document.getElementById('tamFgEthertype').value || undefined,
         protocol: document.getElementById('tamFgProtocol').value || undefined,
         l4_src_port: document.getElementById('tamFgSrcPort').value ? Number(document.getElementById('tamFgSrcPort').value) : undefined,
         l4_dst_port: document.getElementById('tamFgDstPort').value ? Number(document.getElementById('tamFgDstPort').value) : undefined
       };
       if (!item.name || !item.id) return queueMessage('Flow group needs name and ID.');
       addOrReplace(state.tamSpec.flowgroups, item);
-      queueTask(`Queued flow group ${item.name}.`, `set flowgroup ${item.name}`);
+      queueMessage(`Queued flow group ${item.name}.`);
     }
     function queueSession() {
       const nodeType = document.getElementById('tamSessionNodeType').value;
@@ -834,7 +803,7 @@ INDEX_HTML = """<!doctype html>
       if (item.node_type === 'INGRESS' && !item.sampler) return queueMessage('Ingress session needs a sampler.');
       if (item.node_type === 'EGRESS' && !item.collector) return queueMessage('Egress session needs a collector.');
       addOrReplace(state.tamSpec.sessions, item);
-      queueTask(`Queued IFA session ${item.name}.`, `set IFA session ${item.name}`);
+      queueMessage(`Queued IFA session ${item.name}.`);
     }
     async function previewTam() {
       const plan = await api('/api/tam/preview', {
@@ -855,16 +824,7 @@ INDEX_HTML = """<!doctype html>
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({devices, spec: configSpec()})
       });
-      const byDescription = {};
-      (result.results || []).forEach(item => { byDescription[item.description] = item; });
-      state.tamTasks.forEach(task => {
-        const item = byDescription[task.description];
-        if (!item) return;
-        task.status = item.status === 'ok' ? 'ok' : 'error';
-        task.error = item.error || '';
-      });
-      renderPendingTamSpec();
-      document.getElementById('tamPlan').textContent = `Apply finished: ${result.summary?.requests || 0} request(s), ${result.summary?.errors || 0} error(s).`;
+      document.getElementById('tamPlan').textContent = JSON.stringify(result, null, 2);
     }
     async function loadFlow(flowKey) {
       const data = await api('/api/flow-detail?flow_key=' + encodeURIComponent(flowKey) + '&limit=3');
@@ -911,11 +871,11 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('tamQueueSwitch').addEventListener('click', queueSwitchConfig);
     document.getElementById('tamDeleteSwitchId').addEventListener('click', () => {
       state.tamSpec.delete.switch_id = true;
-      queueTask('Queued switch-id delete.', 'delete switch-id');
+      queueMessage('Queued switch-id delete.');
     });
     document.getElementById('tamDeleteEnterpriseId').addEventListener('click', () => {
       state.tamSpec.delete.enterprise_id = true;
-      queueTask('Queued enterprise-id delete.', 'delete enterprise-id');
+      queueMessage('Queued enterprise-id delete.');
     });
     document.getElementById('tamAddCollector').addEventListener('click', queueCollector);
     document.getElementById('tamAddSampler').addEventListener('click', queueSampler);
@@ -924,7 +884,6 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('tamSessionNodeType').addEventListener('change', renderTamForms);
     document.getElementById('tamClearPending').addEventListener('click', () => {
       state.tamSpec = emptyTamSpec();
-      state.tamTasks = [];
       document.getElementById('tamPlan').textContent = '{}';
       renderPendingTamSpec();
     });
