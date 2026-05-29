@@ -229,7 +229,9 @@ INDEX_HTML = """<!doctype html>
         </div>
         <div style="padding: 0 14px 12px;">
           <label for="topoDevices">Per-device credentials</label>
-          <textarea id="topoDevices" placeholder="10.101.110.1,admin,admin&#10;10.101.110.2,admin,admin&#10;10.101.125.2,admin,password"></textarea>
+          <textarea id="topoDevices" autocomplete="off" spellcheck="false" placeholder="10.101.110.1,admin,admin&#10;10.101.110.2,admin,admin"></textarea>
+          <div class="status" style="padding: 6px 0 0;">One device per line. Used for this scan only; not saved by the app.</div>
+          <button id="topoClear" class="secondary" style="margin-top: 8px;">Clear</button>
         </div>
         <div id="topologyStatus" class="status"></div>
         <div id="topologyGraph" class="topology"></div>
@@ -242,9 +244,10 @@ INDEX_HTML = """<!doctype html>
         <h2>TAM / IFA State</h2>
         <div style="padding: 12px 14px;">
           <label for="tamDevices">Devices</label>
-          <textarea id="tamDevices" placeholder="10.101.110.1,admin,admin&#10;10.101.110.2,admin,admin&#10;10.101.125.2,admin,password"></textarea>
+          <textarea id="tamDevices" autocomplete="off" spellcheck="false" placeholder="10.101.110.1,admin,admin&#10;10.101.110.2,admin,admin"></textarea>
           <div class="status" style="padding: 6px 0 0;">Used by Read TAM and Apply. Credentials are not persisted.</div>
           <button id="tamRead" class="primary" style="margin-top: 8px;">Read TAM</button>
+          <button id="tamClear" class="secondary" style="margin-top: 8px;">Clear</button>
         </div>
         <div id="tamStatus" class="status"></div>
       </div>
@@ -520,12 +523,21 @@ INDEX_HTML = """<!doctype html>
       state.topology = await api('/api/topology');
       renderTopology();
     });
+    document.getElementById('topoClear').addEventListener('click', () => {
+      document.getElementById('topoTargets').value = '';
+      document.getElementById('topoUser').value = '';
+      document.getElementById('topoPass').value = '';
+      document.getElementById('topoDevices').value = '';
+    });
     document.getElementById('topoScan').addEventListener('click', () => scanTopology().catch(err => {
       document.getElementById('topologyStatus').textContent = err.message || String(err);
     }));
     document.getElementById('tamRead').addEventListener('click', () => readTam().catch(err => {
       document.getElementById('tamStatus').textContent = err.message || String(err);
     }));
+    document.getElementById('tamClear').addEventListener('click', () => {
+      document.getElementById('tamDevices').value = '';
+    });
     document.getElementById('tamConfigSpec').value = JSON.stringify(defaultTamSpec(), null, 2);
     document.getElementById('tamPreview').addEventListener('click', () => previewTam().catch(err => {
       document.getElementById('tamPlan').textContent = err.message || String(err);
