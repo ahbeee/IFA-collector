@@ -1,0 +1,72 @@
+{
+  "devices": {
+    "1001": {
+      "name": "Border1",
+      "model": "AS7326-56X",
+      "role": "border",
+      "loopback_ip": "2.2.2.2",
+      "ports": {
+        "3": {
+          "interface": "Ethernet0",
+          "front_panel": "Eth1/1",
+          "speed": "10G",
+          "peer_name": "Server1"
+        },
+        "79": {
+          "interface": "Ethernet48",
+          "front_panel": "Eth1/49",
+          "speed": "100G",
+          "peer_device_id": 1003,
+          "peer_port": 91,
+          "peer_name": "Transit"
+        }
+      }
+    },
+    "1002": {
+      "name": "Border2",
+      "model": "AS7326-56X",
+      "role": "border",
+      "loopback_ip": "3.3.3.3",
+      "ports": {
+        "3": {
+          "interface": "Ethernet0",
+          "front_panel": "Eth1/1",
+          "speed": "10G",
+          "peer_name": "Server2"
+        },
+        "79": {
+          "interface": "Ethernet48",
+          "front_panel": "Eth1/49",
+          "speed": "100G",
+          "peer_device_id": 1003,
+          "peer_port": 95,
+          "peer_name": "Transit"
+        }
+      }
+    },
+    "1003": {
+      "name": "Transit",
+      "model": "AS7726-32X",
+      "role": "transit",
+      "loopback_ip": "5.5.5.5",
+      "ports": {
+        "91": {
+          "interface": "Ethernet88",
+          "front_panel": "Eth1/23",
+          "speed": "100G",
+          "peer_device_id": 1001,
+          "peer_port": 79,
+          "peer_name": "Border1"
+        },
+        "95": {
+          "interface": "Ethernet92",
+          "front_panel": "Eth1/24",
+          "speed": "100G",
+          "peer_device_id": 1002,
+          "peer_port": 79,
+          "peer_name": "Border2"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "id": "aruba-aoscx-lns1",
+  "vendor": "aruba",
+  "ifa_version": 2,
+  "gns": 15,
+  "lns": 1,
+  "hop_metadata_size": 32,
+  "fields": [
+    { "name": "lns", "offset_bits": 0, "width_bits": 4 },
+    { "name": "device_id", "offset_bits": 4, "width_bits": 20 },
+    { "name": "ip_ttl", "offset_bits": 24, "width_bits": 8 },
+    {
+      "name": "egress_port_speed",
+      "offset_bits": 32,
+      "width_bits": 4,
+      "enum": {
+        "0": "10G",
+        "1": "25G",
+        "2": "40G",
+        "3": "50G",
+        "4": "100G",
+        "5": "200G",
+        "6": "400G"
+      }
+    },
+    { "name": "congestion", "offset_bits": 36, "width_bits": 2 },
+    { "name": "queue_id", "offset_bits": 38, "width_bits": 6 },
+    { "name": "rx_timestamp_seconds", "offset_bits": 44, "width_bits": 20, "unit": "s" },
+    { "name": "egress_port_number", "offset_bits": 64, "width_bits": 16 },
+    { "name": "ingress_port_number", "offset_bits": 80, "width_bits": 16 },
+    { "name": "rx_timestamp_nanoseconds", "offset_bits": 96, "width_bits": 32, "unit": "ns" },
+    { "name": "residence_time_nanoseconds", "offset_bits": 128, "width_bits": 32, "unit": "ns" },
+    { "name": "egress_queue_transmission_bytes", "offset_bits": 160, "width_bits": 32, "unit": "bytes" },
+    { "name": "opaque_data_2_high", "offset_bits": 192, "width_bits": 16 },
+    { "name": "queue_depth_cells", "offset_bits": 208, "width_bits": 16, "unit": "cells" },
+    { "name": "queue_pool_available_cells", "offset_bits": 224, "width_bits": 32, "unit": "cells" }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "broadcom-sonic-inferred-lns-any",
+  "vendor": "broadcom-sonic-inferred",
+  "ifa_version": 2,
+  "gns": 15,
+  "hop_metadata_size": 32,
+  "fields": [
+    { "name": "word0", "offset_bits": 0, "width_bits": 32 },
+    { "name": "device_id", "offset_bits": 32, "width_bits": 16 },
+    { "name": "ip_ttl", "offset_bits": 48, "width_bits": 8 },
+    { "name": "metadata_byte_7", "offset_bits": 56, "width_bits": 8 },
+    { "name": "word2", "offset_bits": 64, "width_bits": 32 },
+    { "name": "egress_logical_port", "offset_bits": 96, "width_bits": 8 },
+    { "name": "ingress_logical_port", "offset_bits": 112, "width_bits": 8 },
+    { "name": "metadata_byte_15", "offset_bits": 120, "width_bits": 8 },
+    { "name": "timestamp_or_counter_low", "offset_bits": 128, "width_bits": 32 },
+    { "name": "timestamp_or_counter_high", "offset_bits": 160, "width_bits": 32 },
+    { "name": "word6", "offset_bits": 192, "width_bits": 32 },
+    { "name": "word7", "offset_bits": 224, "width_bits": 32 }
+  ]
+}
