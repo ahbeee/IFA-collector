@@ -251,13 +251,13 @@ INDEX_HTML = """<!doctype html>
           <button id="topoAdd" class="primary">Add</button>
         </div>
         <div style="padding: 0 14px 12px;">
-          <button id="topoClear" class="secondary" style="margin-top: 8px;">Clear</button>
           <div id="topoDeviceRows" class="device-list"></div>
         </div>
         <div id="topologyStatus" class="status"></div>
         <div class="topology-actions">
           <button id="topoScan" class="primary">Scan</button>
           <button id="topoReload" class="secondary">Reload</button>
+          <button id="topoClear" class="secondary">Clear</button>
         </div>
         <div id="topologyGraph" class="topology"></div>
       </div>
