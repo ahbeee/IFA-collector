@@ -114,7 +114,7 @@ INDEX_HTML = """<!doctype html>
       align-items: end;
     }
     label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
-    input {
+    input, select {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -182,6 +182,33 @@ INDEX_HTML = """<!doctype html>
       font-size: 13px;
     }
     .device-list input[type="checkbox"] { width: auto; }
+    .device-list input[type="radio"] { width: auto; }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 8px;
+      align-items: end;
+      margin-bottom: 12px;
+    }
+    .form-grid .wide { grid-column: span 2; }
+    .form-section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      background: #fbfcfd;
+    }
+    .form-section h3 {
+      margin: 0 0 10px;
+      font-size: 13px;
+    }
+    .table-actions {
+      display: flex;
+      justify-content: flex-end;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfd;
+    }
     .mini {
       border: 1px solid var(--line);
       background: white;
@@ -204,6 +231,8 @@ INDEX_HTML = """<!doctype html>
     @media (max-width: 900px) {
       .grid { grid-template-columns: 1fr; }
       .toolbar { grid-template-columns: 1fr; }
+      .form-grid { grid-template-columns: 1fr; }
+      .form-grid .wide { grid-column: span 1; }
       main { padding: 14px; }
       th, td { padding: 8px; }
     }
@@ -283,12 +312,67 @@ INDEX_HTML = """<!doctype html>
       <div class="panel">
         <h2>Configuration Preview / Apply</h2>
         <div style="padding: 12px 14px;">
-          <label for="tamConfigSpec">Config JSON</label>
-          <textarea id="tamConfigSpec" style="min-height: 260px;"></textarea>
-          <div class="status" style="padding: 6px 0 0;">Preview builds RESTCONF requests only. Apply sends those requests to the devices listed above.</div>
+          <div class="form-section">
+            <h3>Switch</h3>
+            <div class="form-grid">
+              <div><label for="tamSwitchId">Switch ID</label><input id="tamSwitchId" type="number" placeholder="1001"></div>
+              <div><label for="tamEnterpriseId">Enterprise ID</label><input id="tamEnterpriseId" type="number" placeholder="4434"></div>
+              <div><label for="tamIfaStatus">IFA Status</label><select id="tamIfaStatus"><option value="">No change</option><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option></select></div>
+              <button id="tamQueueSwitch" class="secondary">Queue Set</button>
+            </div>
+            <button id="tamDeleteSwitchId" class="mini">Queue Delete Switch ID</button>
+            <button id="tamDeleteEnterpriseId" class="mini">Queue Delete Enterprise ID</button>
+          </div>
+          <div class="form-section">
+            <h3>Add Collector</h3>
+            <div class="form-grid">
+              <div><label for="tamCollectorName">Name</label><input id="tamCollectorName" placeholder="ifa_collector"></div>
+              <div><label for="tamCollectorIp">IP</label><input id="tamCollectorIp" placeholder="192.168.100.100"></div>
+              <div><label for="tamCollectorPort">Port</label><input id="tamCollectorPort" type="number" value="9090"></div>
+              <div><label for="tamCollectorProtocol">Protocol</label><select id="tamCollectorProtocol"><option>UDP</option><option>TCP</option></select></div>
+              <div><label for="tamCollectorVrf">VRF</label><select id="tamCollectorVrf"></select></div>
+              <button id="tamAddCollector" class="secondary">Queue Add</button>
+            </div>
+          </div>
+          <div class="form-section">
+            <h3>Add Sampler</h3>
+            <div class="form-grid">
+              <div><label for="tamSamplerName">Name</label><input id="tamSamplerName" placeholder="ifa_samp"></div>
+              <div><label for="tamSamplerRate">Sampling Rate</label><input id="tamSamplerRate" type="number" value="1"></div>
+              <button id="tamAddSampler" class="secondary">Queue Add</button>
+            </div>
+          </div>
+          <div class="form-section">
+            <h3>Add Flow Group</h3>
+            <div class="form-grid">
+              <div><label for="tamFgName">Name</label><input id="tamFgName" placeholder="s01_to_s02_udp"></div>
+              <div><label for="tamFgId">ID</label><input id="tamFgId" type="number" placeholder="30"></div>
+              <div><label for="tamFgPriority">Priority</label><input id="tamFgPriority" type="number" value="100"></div>
+              <div><label for="tamFgProtocol">Protocol</label><select id="tamFgProtocol"><option value="">Any</option><option>UDP</option><option>TCP</option></select></div>
+              <div><label for="tamFgSrcIp">SRC IP</label><input id="tamFgSrcIp" placeholder="1.1.1.1/32"></div>
+              <div><label for="tamFgDstIp">DST IP</label><input id="tamFgDstIp" placeholder="4.4.4.4/32"></div>
+              <div><label for="tamFgSrcPort">SRC L4 Port</label><input id="tamFgSrcPort" type="number"></div>
+              <div><label for="tamFgDstPort">DST L4 Port</label><input id="tamFgDstPort" type="number"></div>
+              <button id="tamAddFlowgroup" class="secondary">Queue Add</button>
+            </div>
+          </div>
+          <div class="form-section">
+            <h3>Add IFA Session</h3>
+            <div class="form-grid">
+              <div><label for="tamSessionName">Name</label><input id="tamSessionName" placeholder="ifa_s01_to_s02_UDP"></div>
+              <div><label for="tamSessionFlowgroup">Flow Group</label><select id="tamSessionFlowgroup"></select></div>
+              <div><label for="tamSessionNodeType">Node Type</label><select id="tamSessionNodeType"><option>INGRESS</option><option>EGRESS</option></select></div>
+              <div><label for="tamSessionCollector">Collector</label><select id="tamSessionCollector"></select></div>
+              <div><label for="tamSessionSampler">Sampler</label><select id="tamSessionSampler"></select></div>
+              <button id="tamAddSession" class="secondary">Queue Add</button>
+            </div>
+          </div>
+          <div class="status" style="padding: 6px 0 0;">Changes are queued locally. Preview builds RESTCONF requests only. Apply sends them to the selected device.</div>
           <button id="tamPreview" class="secondary" style="margin-top: 8px;">Preview</button>
           <button id="tamApply" class="primary" style="margin-top: 8px;">Apply</button>
+          <button id="tamClearPending" class="secondary" style="margin-top: 8px;">Clear Pending</button>
         </div>
+        <pre id="tamPending">{}</pre>
         <pre id="tamPlan">{}</pre>
       </div>
     </section>
@@ -298,7 +382,7 @@ INDEX_HTML = """<!doctype html>
     </section>
   </main>
   <script>
-    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null, devices: [], tamDeviceIndex: -1 };
+    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null, devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec() };
 
     async function api(path, options) {
       const res = await fetch(path, options);
@@ -545,6 +629,12 @@ INDEX_HTML = """<!doctype html>
       if (f.ethertype) parts.push(`ethertype=${f.ethertype}`);
       return parts.join(', ');
     }
+    function tableWithActions(kind, headers, rows) {
+      const controls = rows.length
+        ? `<div class="table-actions"><button class="mini" data-delete-kind="${kind}">Queue Selected Deletes</button></div>`
+        : '';
+      return controls + table(['Delete', ...headers], rows);
+    }
     function renderTam() {
       const tam = state.tam || { devices: [], errors: [] };
       document.getElementById('tamStatus').textContent = tam.summary
@@ -562,14 +652,19 @@ INDEX_HTML = """<!doctype html>
           const source = tam.devices.find(item => item.host === d.host) || {};
           return `<tr><td>${esc(d.host)}</td><td>${esc(d.switch_id)}</td><td>${esc(d.enterprise_id)}</td><td>${esc(d.ifa_status)}</td><td>${esc((source.vrfs || []).join(', '))}</td><td>${esc(d.features)}</td></tr>`;
         }));
-      document.getElementById('tamCollectors').innerHTML = table(['Host', 'Name', 'IP', 'Port', 'Protocol', 'VRF'],
-        tam.devices.flatMap(d => (d.collectors || []).map(c => `<tr><td>${esc(d.host)}</td><td>${esc(c.name)}</td><td>${esc(c.ip)}</td><td>${esc(c.port)}</td><td>${esc(c.protocol)}</td><td>${esc(c.vrf || '-')}</td></tr>`)));
-      document.getElementById('tamSamplers').innerHTML = table(['Host', 'Name', 'Sampling Rate'],
-        tam.devices.flatMap(d => (d.samplers || []).map(s => `<tr><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.sampling_rate)}</td></tr>`)));
-      document.getElementById('tamFlowgroups').innerHTML = table(['Host', 'Name', 'ID', 'Match', 'Packets', 'Bytes'],
-        tam.devices.flatMap(d => (d.flowgroups || []).map(f => `<tr><td>${esc(d.host)}</td><td>${esc(f.name)}</td><td>${esc(f.id)}</td><td><code>${esc(flowgroupMatch(f))}</code></td><td>${esc(f.packets)}</td><td>${esc(f.bytes)}</td></tr>`)));
-      document.getElementById('tamSessions').innerHTML = table(['Host', 'Name', 'Flow Group', 'Node Type', 'Collector', 'Sampler'],
-        tam.devices.flatMap(d => (d.ifa_sessions || []).map(s => `<tr><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.flowgroup)}</td><td>${esc(s.node_type)}</td><td>${esc(s.collector || '-')}</td><td>${esc(s.sampler || '-')}</td></tr>`)));
+      document.getElementById('tamCollectors').innerHTML = tableWithActions('collectors', ['Host', 'Name', 'IP', 'Port', 'Protocol', 'VRF'],
+        tam.devices.flatMap(d => (d.collectors || []).map(c => `<tr><td><input type="checkbox" data-tam-delete="collectors" value="${esc(c.name)}"></td><td>${esc(d.host)}</td><td>${esc(c.name)}</td><td>${esc(c.ip)}</td><td>${esc(c.port)}</td><td>${esc(c.protocol)}</td><td>${esc(c.vrf || '-')}</td></tr>`)));
+      document.getElementById('tamSamplers').innerHTML = tableWithActions('samplers', ['Host', 'Name', 'Sampling Rate'],
+        tam.devices.flatMap(d => (d.samplers || []).map(s => `<tr><td><input type="checkbox" data-tam-delete="samplers" value="${esc(s.name)}"></td><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.sampling_rate)}</td></tr>`)));
+      document.getElementById('tamFlowgroups').innerHTML = tableWithActions('flowgroups', ['Host', 'Name', 'ID', 'Match', 'Packets', 'Bytes'],
+        tam.devices.flatMap(d => (d.flowgroups || []).map(f => `<tr><td><input type="checkbox" data-tam-delete="flowgroups" value="${esc(f.name)}"></td><td>${esc(d.host)}</td><td>${esc(f.name)}</td><td>${esc(f.id)}</td><td><code>${esc(flowgroupMatch(f))}</code></td><td>${esc(f.packets)}</td><td>${esc(f.bytes)}</td></tr>`)));
+      document.getElementById('tamSessions').innerHTML = tableWithActions('sessions', ['Host', 'Name', 'Flow Group', 'Node Type', 'Collector', 'Sampler'],
+        tam.devices.flatMap(d => (d.ifa_sessions || []).map(s => `<tr><td><input type="checkbox" data-tam-delete="sessions" value="${esc(s.name)}"></td><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.flowgroup)}</td><td>${esc(s.node_type)}</td><td>${esc(s.collector || '-')}</td><td>${esc(s.sampler || '-')}</td></tr>`)));
+      document.querySelectorAll('button[data-delete-kind]').forEach(button => {
+        button.addEventListener('click', () => queueSelectedDeletes(button.dataset.deleteKind));
+      });
+      renderTamForms();
+      renderPendingTamSpec();
     }
     async function readTam() {
       const status = document.getElementById('tamStatus');
@@ -586,22 +681,129 @@ INDEX_HTML = """<!doctype html>
       });
       renderTam();
     }
-    function defaultTamSpec() {
-      return {
-        switch: {switch_id: 1001, enterprise_id: 4434},
-        collectors: [{name: 'ifa_collector', ip: '192.168.100.100', port: 9090, protocol: 'UDP', vrf: 'default'}],
-        samplers: [{name: 'ifa_samp', sampling_rate: 1}],
-        flowgroups: [
-          {name: 's01_to_s02_udp', id: 30, priority: 100, src_ip: '1.1.1.1/32', dst_ip: '4.4.4.4/32', protocol: 'UDP'}
-        ],
-        sessions: [
-          {name: 'ifa_s01_to_s02_UDP', flowgroup: 's01_to_s02_udp', node_type: 'INGRESS', sampler: 'ifa_samp'}
-        ],
-        ifa_status: 'ACTIVE'
-      };
+    function emptyTamSpec() {
+      return {delete: {sessions: [], collectors: [], samplers: [], flowgroups: []}, switch: {}, collectors: [], samplers: [], flowgroups: [], sessions: []};
     }
     function configSpec() {
-      return JSON.parse(document.getElementById('tamConfigSpec').value || '{}');
+      const spec = JSON.parse(JSON.stringify(state.tamSpec));
+      ['sessions', 'collectors', 'samplers', 'flowgroups'].forEach(kind => {
+        spec.delete[kind] = [...new Set(spec.delete[kind] || [])];
+      });
+      if (!Object.keys(spec.switch || {}).length) delete spec.switch;
+      if (!spec.collectors.length) delete spec.collectors;
+      if (!spec.samplers.length) delete spec.samplers;
+      if (!spec.flowgroups.length) delete spec.flowgroups;
+      if (!spec.sessions.length) delete spec.sessions;
+      if (!Object.values(spec.delete || {}).some(value => Array.isArray(value) ? value.length : Boolean(value))) delete spec.delete;
+      return spec;
+    }
+    function selectedTamDevice() {
+      const devices = state.tam?.devices || [];
+      const selected = state.devices[state.tamDeviceIndex];
+      return devices.find(d => d.host === selected?.host) || devices[0] || {};
+    }
+    function namesFor(kind) {
+      const device = selectedTamDevice();
+      const existing = (device[kind] || []).map(item => item.name).filter(Boolean);
+      const pending = (state.tamSpec[kind] || []).map(item => item.name).filter(Boolean);
+      return [...new Set([...existing, ...pending])];
+    }
+    function setOptions(id, values, emptyLabel = '') {
+      const select = document.getElementById(id);
+      if (!select) return;
+      const current = select.value;
+      select.innerHTML = `${emptyLabel ? `<option value="">${esc(emptyLabel)}</option>` : ''}${values.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}`;
+      if (values.includes(current) || (!current && emptyLabel)) select.value = current;
+    }
+    function renderTamForms() {
+      const device = selectedTamDevice();
+      setOptions('tamCollectorVrf', device.vrfs || [], 'None');
+      setOptions('tamSessionFlowgroup', namesFor('flowgroups'), 'Select flow group');
+      setOptions('tamSessionCollector', namesFor('collectors'), 'None');
+      setOptions('tamSessionSampler', namesFor('samplers'), 'None');
+    }
+    function renderPendingTamSpec() {
+      const spec = configSpec();
+      document.getElementById('tamPending').textContent = JSON.stringify(spec, null, 2);
+    }
+    function queueMessage(message) {
+      document.getElementById('tamPlan').textContent = message;
+      renderTamForms();
+      renderPendingTamSpec();
+    }
+    function addOrReplace(list, item) {
+      const index = list.findIndex(row => row.name === item.name);
+      if (index >= 0) list[index] = item;
+      else list.push(item);
+    }
+    function addDelete(kind, name) {
+      if (!name) return;
+      if (!state.tamSpec.delete[kind].includes(name)) state.tamSpec.delete[kind].push(name);
+    }
+    function queueSelectedDeletes(kind) {
+      const selected = [...document.querySelectorAll(`input[data-tam-delete="${kind}"]:checked`)].map(input => input.value);
+      selected.forEach(name => addDelete(kind, name));
+      queueMessage(selected.length ? `Queued ${selected.length} ${kind} delete operation(s).` : `Select ${kind} rows before queueing delete.`);
+    }
+    function queueSwitchConfig() {
+      const switchId = document.getElementById('tamSwitchId').value.trim();
+      const enterpriseId = document.getElementById('tamEnterpriseId').value.trim();
+      const ifaStatus = document.getElementById('tamIfaStatus').value;
+      if (switchId) state.tamSpec.switch.switch_id = Number(switchId);
+      if (enterpriseId) state.tamSpec.switch.enterprise_id = Number(enterpriseId);
+      if (ifaStatus) state.tamSpec.ifa_status = ifaStatus;
+      queueMessage('Queued switch settings.');
+    }
+    function queueCollector() {
+      const item = {
+        name: document.getElementById('tamCollectorName').value.trim(),
+        ip: document.getElementById('tamCollectorIp').value.trim(),
+        port: Number(document.getElementById('tamCollectorPort').value || 0),
+        protocol: document.getElementById('tamCollectorProtocol').value,
+        vrf: document.getElementById('tamCollectorVrf').value || undefined
+      };
+      if (!item.name || !item.ip || !item.port) return queueMessage('Collector needs name, IP, and port.');
+      addOrReplace(state.tamSpec.collectors, item);
+      queueMessage(`Queued collector ${item.name}.`);
+    }
+    function queueSampler() {
+      const item = {
+        name: document.getElementById('tamSamplerName').value.trim(),
+        sampling_rate: Number(document.getElementById('tamSamplerRate').value || 0)
+      };
+      if (!item.name || !item.sampling_rate) return queueMessage('Sampler needs name and sampling rate.');
+      addOrReplace(state.tamSpec.samplers, item);
+      queueMessage(`Queued sampler ${item.name}.`);
+    }
+    function queueFlowgroup() {
+      const item = {
+        name: document.getElementById('tamFgName').value.trim(),
+        id: Number(document.getElementById('tamFgId').value || 0),
+        priority: Number(document.getElementById('tamFgPriority').value || 100),
+        src_ip: document.getElementById('tamFgSrcIp').value.trim() || undefined,
+        dst_ip: document.getElementById('tamFgDstIp').value.trim() || undefined,
+        protocol: document.getElementById('tamFgProtocol').value || undefined,
+        l4_src_port: document.getElementById('tamFgSrcPort').value ? Number(document.getElementById('tamFgSrcPort').value) : undefined,
+        l4_dst_port: document.getElementById('tamFgDstPort').value ? Number(document.getElementById('tamFgDstPort').value) : undefined
+      };
+      if (!item.name || !item.id) return queueMessage('Flow group needs name and ID.');
+      addOrReplace(state.tamSpec.flowgroups, item);
+      queueMessage(`Queued flow group ${item.name}.`);
+    }
+    function queueSession() {
+      const nodeType = document.getElementById('tamSessionNodeType').value;
+      const item = {
+        name: document.getElementById('tamSessionName').value.trim(),
+        flowgroup: document.getElementById('tamSessionFlowgroup').value,
+        node_type: nodeType,
+        collector: nodeType === 'EGRESS' ? document.getElementById('tamSessionCollector').value || undefined : undefined,
+        sampler: nodeType === 'INGRESS' ? document.getElementById('tamSessionSampler').value || undefined : undefined
+      };
+      if (!item.name || !item.flowgroup) return queueMessage('IFA session needs name and flow group.');
+      if (item.node_type === 'INGRESS' && !item.sampler) return queueMessage('Ingress session needs a sampler.');
+      if (item.node_type === 'EGRESS' && !item.collector) return queueMessage('Egress session needs a collector.');
+      addOrReplace(state.tamSpec.sessions, item);
+      queueMessage(`Queued IFA session ${item.name}.`);
     }
     async function previewTam() {
       const plan = await api('/api/tam/preview', {
@@ -664,8 +866,27 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('tamRead').addEventListener('click', () => readTam().catch(err => {
       document.getElementById('tamStatus').textContent = err.message || String(err);
     }));
-    document.getElementById('tamConfigSpec').value = JSON.stringify(defaultTamSpec(), null, 2);
     renderSharedDeviceRows();
+    renderPendingTamSpec();
+    document.getElementById('tamQueueSwitch').addEventListener('click', queueSwitchConfig);
+    document.getElementById('tamDeleteSwitchId').addEventListener('click', () => {
+      state.tamSpec.delete.switch_id = true;
+      queueMessage('Queued switch-id delete.');
+    });
+    document.getElementById('tamDeleteEnterpriseId').addEventListener('click', () => {
+      state.tamSpec.delete.enterprise_id = true;
+      queueMessage('Queued enterprise-id delete.');
+    });
+    document.getElementById('tamAddCollector').addEventListener('click', queueCollector);
+    document.getElementById('tamAddSampler').addEventListener('click', queueSampler);
+    document.getElementById('tamAddFlowgroup').addEventListener('click', queueFlowgroup);
+    document.getElementById('tamAddSession').addEventListener('click', queueSession);
+    document.getElementById('tamSessionNodeType').addEventListener('change', renderTamForms);
+    document.getElementById('tamClearPending').addEventListener('click', () => {
+      state.tamSpec = emptyTamSpec();
+      document.getElementById('tamPlan').textContent = '{}';
+      renderPendingTamSpec();
+    });
     document.getElementById('tamPreview').addEventListener('click', () => previewTam().catch(err => {
       document.getElementById('tamPlan').textContent = err.message || String(err);
     }));
