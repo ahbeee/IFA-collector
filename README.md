@@ -52,3 +52,15 @@ RESTCONF TAM/IFA state read currently expects these SONiC paths:
 - `sonic-vrf:sonic-vrf/VRF/VRF_LIST`
 
 Flow group payload builders support IPv4, IPv6, source/destination MAC, L4 source/destination port, protocol, VLAN ID, and ethertype values observed from SONiC CLI logs: `arp`, `ip`, `ipv6`, `lldp`, `mpls`, `roce`, and `vlan`.
+
+Direct RESTCONF write validation notes:
+
+- Leaf updates such as switch ID and enterprise ID use `PATCH`; deleting the leaf uses `DELETE`.
+- Collector, sampler, flowgroup, IFA session, and IFA feature updates use `PATCH` on the list/container path and return HTTP 204 on success.
+- List item deletion uses RESTCONF key syntax such as `collector=NAME`, `sampler=NAME`, `flowgroup=NAME`, and `ifa-session=NAME`.
+- Flowgroup IDs can be read from `sonic-tam-flowgroups:sonic-tam-flowgroups/TAM_FLOWGROUP_TABLE/TAM_FLOWGROUP_TABLE_LIST`.
+- A collector cannot be deleted while an IFA session uses it.
+- A flowgroup cannot be deleted while an IFA session uses it.
+- One flowgroup cannot be used by multiple IFA sessions on the tested SONiC build.
+- Only one collector can be used by active IFA sessions on the tested SONiC build.
+- Safe delete order is IFA sessions, collectors/samplers, then flowgroups.
