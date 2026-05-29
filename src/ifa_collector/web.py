@@ -50,17 +50,20 @@ INDEX_HTML = """<!doctype html>
     header h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: 0; }
     main { padding: 20px 24px 32px; max-width: 1500px; margin: 0 auto; }
     .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
-    .tabs button {
+    .tabs a {
       border: 1px solid var(--line);
       background: var(--panel);
       color: var(--text);
       padding: 8px 12px;
       cursor: pointer;
       border-radius: 6px;
+      text-decoration: none;
     }
-    .tabs button.active { background: var(--accent); color: white; border-color: var(--accent); }
+    .tabs a.active { background: var(--accent); color: white; border-color: var(--accent); }
     section { display: none; }
     section.active { display: block; }
+    main:has(section:target) section.active:not(:target) { display: none; }
+    section:target { display: block; }
     .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
     .metric {
       background: var(--panel);
@@ -245,12 +248,12 @@ INDEX_HTML = """<!doctype html>
   </header>
   <main>
     <div class="tabs">
-      <button data-tab="overview" class="active">Overview</button>
-      <button data-tab="flows">Flows</button>
-      <button data-tab="paths">Paths</button>
-      <button data-tab="topology">Topology</button>
-      <button data-tab="tam">TAM</button>
-      <button data-tab="errors">Diagnostics</button>
+      <a href="#overview" data-tab="overview" class="active">Overview</a>
+      <a href="#flows" data-tab="flows">Flows</a>
+      <a href="#paths" data-tab="paths">Paths</a>
+      <a href="#topology" data-tab="topology">Topology</a>
+      <a href="#tam" data-tab="tam">TAM</a>
+      <a href="#errors" data-tab="errors">Diagnostics</a>
     </div>
 
     <section id="overview" class="active">
@@ -387,8 +390,24 @@ INDEX_HTML = """<!doctype html>
       <div class="panel"><h2>Parse Errors</h2><div id="errorsTable"></div></div>
     </section>
   </main>
-  <script>
-    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null, devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [] };
+  <script src="/app.js"></script>
+  <script id="app-js-inline" type="text/plain">
+    function switchTab(tabName) {
+      document.querySelectorAll('.tabs [data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tabName));
+      document.querySelectorAll('section').forEach(s => s.classList.toggle('active', s.id === tabName));
+    }
+    const state = {
+      exporters: [],
+      flows: [],
+      paths: [],
+      errors: [],
+      topology: null,
+      tam: null,
+      devices: [],
+      tamDeviceIndex: -1,
+      tamSpec: {delete: {sessions: [], collectors: [], samplers: [], flowgroups: []}, switch: {}, collectors: [], samplers: [], flowgroups: [], sessions: []},
+      tamTasks: []
+    };
 
     async function api(path, options) {
       const res = await fetch(path, options);
@@ -878,14 +897,14 @@ INDEX_HTML = """<!doctype html>
         </div>${i < r.hops.length - 1 ? '<span class="arrow">-></span>' : ''}`).join('')}</div>
       </div>`).join('');
       document.getElementById('flowDetail').innerHTML = `<p><code>${esc(flow.flow_key)}</code></p>${records}`;
-      document.querySelector('[data-tab="flows"]').click();
+      switchTab('flows');
+      location.hash = 'flows';
     }
-    document.querySelectorAll('.tabs button').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
-        btn.classList.add('active');
-        document.getElementById(btn.dataset.tab).classList.add('active');
+    document.querySelectorAll('.tabs [data-tab]').forEach(btn => {
+      btn.addEventListener('click', event => {
+        event.preventDefault();
+        switchTab(btn.dataset.tab);
+        location.hash = btn.dataset.tab;
       });
     });
     document.getElementById('topoReload').addEventListener('click', async () => {
@@ -941,6 +960,11 @@ INDEX_HTML = """<!doctype html>
 """
 
 
+def _app_js() -> str:
+    marker = '<script id="app-js-inline" type="text/plain">'
+    return INDEX_HTML.split(marker, 1)[1].split("</script>", 1)[0]
+
+
 def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None) -> None:
     topology_path = topology_path or Path("topology/topology.json")
 
@@ -950,6 +974,8 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
             try:
                 if parsed.path == "/":
                     self._send_html(INDEX_HTML)
+                elif parsed.path == "/app.js":
+                    self._send_js(_app_js())
                 elif parsed.path == "/api/exporters":
                     self._send_json({"exporters": _query(db_path).exporters()})
                 elif parsed.path == "/api/flows":
@@ -1040,6 +1066,15 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
             data = body.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _send_js(self, body: str) -> None:
+            data = body.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
