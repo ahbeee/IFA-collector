@@ -30,10 +30,16 @@ class QueryStore:
         return _rows_to_dicts(
             self.conn.execute(
                 """
-                SELECT flow_key, src_ip, dst_ip, protocol, src_port, dst_port, tunnel_vni,
-                       records, first_seen_ns, last_seen_ns
-                FROM flows
-                ORDER BY records DESC
+                SELECT
+                    f.flow_key, f.src_ip, f.dst_ip, f.protocol, f.src_port, f.dst_port, f.tunnel_vni,
+                    f.records, f.first_seen_ns, f.last_seen_ns,
+                    COUNT(DISTINCT r.resolved_traffic_path) AS paths,
+                    MIN(r.hop_count) AS min_hops,
+                    MAX(r.hop_count) AS max_hops
+                FROM flows AS f
+                LEFT JOIN ifa_records AS r ON r.flow_key = f.flow_key
+                GROUP BY f.flow_key
+                ORDER BY f.records DESC
                 LIMIT ?
                 """,
                 (limit,),
@@ -44,7 +50,12 @@ class QueryStore:
         return _rows_to_dicts(
             self.conn.execute(
                 """
-                SELECT resolved_traffic_path, traffic_path, metadata_path, COUNT(*) AS records
+                SELECT
+                    resolved_traffic_path, traffic_path, metadata_path,
+                    COUNT(*) AS records,
+                    COUNT(DISTINCT flow_key) AS flows,
+                    MIN(hop_count) AS min_hops,
+                    MAX(hop_count) AS max_hops
                 FROM ifa_records
                 GROUP BY resolved_traffic_path, traffic_path, metadata_path
                 ORDER BY records DESC
@@ -70,7 +81,11 @@ class QueryStore:
         paths = _rows_to_dicts(
             self.conn.execute(
                 """
-                SELECT resolved_traffic_path, traffic_path, metadata_path, COUNT(*) AS records
+                SELECT
+                    resolved_traffic_path, traffic_path, metadata_path,
+                    COUNT(*) AS records,
+                    MIN(hop_count) AS min_hops,
+                    MAX(hop_count) AS max_hops
                 FROM ifa_records
                 WHERE flow_key = ?
                 GROUP BY resolved_traffic_path, traffic_path, metadata_path

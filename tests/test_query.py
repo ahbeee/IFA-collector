@@ -41,6 +41,14 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
 
     store = QueryStore(db)
     assert store.exporters()[0]["exporter_key"] == "exp"
-    assert store.flows()[0]["flow_key"] == "flow"
-    assert store.paths()[0]["resolved_traffic_path"] == "A -> B"
+    flow = store.flows()[0]
+    assert flow["flow_key"] == "flow"
+    assert flow["paths"] == 1
+    assert flow["min_hops"] == 2
+    assert flow["max_hops"] == 2
+    path = store.paths()[0]
+    assert path["resolved_traffic_path"] == "A -> B"
+    assert path["flows"] == 1
+    assert path["min_hops"] == 2
+    assert path["max_hops"] == 2
     store.close()

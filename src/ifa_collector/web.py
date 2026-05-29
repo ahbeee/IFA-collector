@@ -405,6 +405,23 @@ INDEX_HTML = """<!doctype html>
       if (row.gaps || row.duplicate_or_reordered) return 'bad';
       return '';
     }
+    function protocolLabel(value) {
+      const map = {6: 'TCP', 17: 'UDP'};
+      return map[value] || value || '-';
+    }
+    function hopRange(row) {
+      if (row.min_hops == null && row.max_hops == null) return '-';
+      return row.min_hops === row.max_hops ? String(row.min_hops) : `${row.min_hops}-${row.max_hops}`;
+    }
+    function deviceInfo(host) {
+      const configured = state.devices.find(d => d.host === host) || {};
+      const tamDevice = (state.tam?.devices || []).find(d => d.host === host) || {};
+      return {...configured, ...tamDevice, host};
+    }
+    function deviceDisplay(host) {
+      const info = deviceInfo(host);
+      return info.hostname ? `${info.hostname} (${host})` : host;
+    }
     async function loadAll() {
       const [exporters, flows, paths, errors, topology] = await Promise.all([
         api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/errors'), api('/api/topology')
@@ -440,20 +457,25 @@ INDEX_HTML = """<!doctype html>
     function renderFlows() {
       const rows = state.flows.map(f => `<tr class="clickable" onclick="loadFlow(${JSON.stringify(f.flow_key).replace(/"/g, '&quot;')})">
         <td><code>${esc(f.src_ip)}:${esc(f.src_port)} -> ${esc(f.dst_ip)}:${esc(f.dst_port)}</code></td>
-        <td>${esc(f.protocol)}</td>
+        <td>${esc(protocolLabel(f.protocol))}</td>
         <td>${esc(f.records)}</td>
+        <td>${esc(f.paths)}</td>
+        <td>${esc(hopRange(f))}</td>
+        <td>${esc(f.last_seen_ns)}</td>
         <td><code>${esc(f.flow_key)}</code></td>
       </tr>`);
-      document.getElementById('flowsTable').innerHTML = table(['Flow', 'Proto', 'Records', 'Key'], rows);
+      document.getElementById('flowsTable').innerHTML = table(['Flow', 'Proto', 'Records', 'Paths', 'Hops', 'Last Seen ns', 'Key'], rows);
     }
     function renderPaths() {
       const rows = state.paths.map(p => `<tr>
         <td class="path">${esc(p.resolved_traffic_path)}</td>
         <td><code>${esc(p.traffic_path)}</code></td>
         <td><code>${esc(p.metadata_path)}</code></td>
+        <td>${esc(p.flows)}</td>
+        <td>${esc(hopRange(p))}</td>
         <td>${esc(p.records)}</td>
       </tr>`);
-      document.getElementById('pathsTable').innerHTML = table(['Resolved Traffic Path', 'Traffic Order', 'Metadata Order', 'Records'], rows);
+      document.getElementById('pathsTable').innerHTML = table(['Resolved Traffic Path', 'Traffic Order', 'Metadata Order', 'Flows', 'Hops', 'Records'], rows);
     }
     function renderErrors() {
       const rows = state.errors.map(e => `<tr><td>${esc(e.error)}</td><td>${esc(e.occurrences)}</td></tr>`);
@@ -592,12 +614,18 @@ INDEX_HTML = """<!doctype html>
         container.innerHTML = '';
         return;
       }
-      container.innerHTML = table(['Select', 'IP', 'Hostname', 'Username'], state.devices.map((row, i) => `<tr>
+      container.innerHTML = table(['Select', 'IP', 'Hostname', 'Switch ID', 'Enterprise ID', 'IFA', 'Username'], state.devices.map((row, i) => {
+        const info = deviceInfo(row.host);
+        return `<tr>
         <td><input name="tamDevice" data-tam-device="${i}" type="radio" ${state.tamDeviceIndex === i ? 'checked' : ''}></td>
         <td>${esc(row.host)}</td>
         <td>${esc(row.hostname || '-')}</td>
+        <td>${esc(info.switch_id || '-')}</td>
+        <td>${esc(info.enterprise_id || '-')}</td>
+        <td>${esc(info.ifa_status || '-')}</td>
         <td>${esc(row.username)}</td>
-      </tr>`));
+      </tr>`;
+      }));
       container.querySelectorAll('input[data-tam-device]').forEach(input => {
         input.addEventListener('change', () => {
           state.tamDeviceIndex = Number(input.dataset.tamDevice);
@@ -656,7 +684,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('tamSwitches').innerHTML = table(['Host', 'Switch ID', 'Enterprise ID', 'IFA', 'VRFs', 'Features'],
         switches.map(d => {
           const source = tam.devices.find(item => item.host === d.host) || {};
-          return `<tr><td>${esc(d.host)}</td><td>${esc(d.switch_id)}</td><td>${esc(d.enterprise_id)}</td><td>${esc(d.ifa_status)}</td><td>${esc((source.vrfs || []).join(', '))}</td><td>${esc(d.features)}</td></tr>`;
+          return `<tr><td>${esc(deviceDisplay(d.host))}</td><td>${esc(d.switch_id)}</td><td>${esc(d.enterprise_id)}</td><td>${esc(d.ifa_status)}</td><td>${esc((source.vrfs || []).join(', '))}</td><td>${esc(d.features)}</td></tr>`;
         }));
       document.getElementById('tamCollectors').innerHTML = tableWithActions('collectors', ['Host', 'Name', 'IP', 'Port', 'Protocol', 'VRF'],
         tam.devices.flatMap(d => (d.collectors || []).map(c => `<tr><td><input type="checkbox" data-tam-delete="collectors" value="${esc(c.name)}"></td><td>${esc(d.host)}</td><td>${esc(c.name)}</td><td>${esc(c.ip)}</td><td>${esc(c.port)}</td><td>${esc(c.protocol)}</td><td>${esc(c.vrf || '-')}</td></tr>`)));
@@ -865,6 +893,10 @@ INDEX_HTML = """<!doctype html>
       });
       renderPendingTamSpec();
       document.getElementById('tamPlan').textContent = `Apply finished: ${result.summary?.requests || 0} request(s), ${result.summary?.errors || 0} error(s).`;
+      if ((result.summary?.errors || 0) === 0) {
+        await readTam();
+        document.getElementById('tamPlan').textContent = `Apply finished: ${result.summary?.requests || 0} request(s), ${result.summary?.errors || 0} error(s). TAM state refreshed.`;
+      }
     }
     async function loadFlow(flowKey) {
       const data = await api('/api/flow-detail?flow_key=' + encodeURIComponent(flowKey) + '&limit=3');
@@ -873,6 +905,7 @@ INDEX_HTML = """<!doctype html>
         <p><span class="pill">seq ${esc(r.sequence_number)}</span> <code>${esc(r.resolved_traffic_path)}</code></p>
         <div class="hopline">${r.hops.map((h, i) => `<div class="hop">
           <strong>${esc(h.device_name || h.device_id)}</strong><br>
+          ${h.model ? `${esc(h.model)}<br>` : ''}
           ingress ${esc(h.ingress_interface || h.ingress_logical_port)} -> egress ${esc(h.egress_interface || h.egress_logical_port)}<br>
           ttl ${esc(h.ttl)}
         </div>${i < r.hops.length - 1 ? '<span class="arrow">-></span>' : ''}`).join('')}</div>
