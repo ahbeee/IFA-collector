@@ -46,5 +46,7 @@ RESTCONF TAM/IFA state read currently expects these SONiC paths:
 - `openconfig-tam:tam/features-state/feature-state`
 - `openconfig-tam:tam/switch`
 - `openconfig-tam:tam/collectors`
+- `openconfig-tam:tam/samplers`
 - `openconfig-tam:tam/flowgroups`
 - `openconfig-tam:tam/ifa-sessions`
+- `sonic-vrf:sonic-vrf/VRF/VRF_LIST`

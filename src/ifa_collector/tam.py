@@ -11,8 +11,10 @@ TAM_PATHS = {
     "features": "openconfig-tam:tam/features-state/feature-state",
     "switch": "openconfig-tam:tam/switch",
     "collectors": "openconfig-tam:tam/collectors",
+    "samplers": "openconfig-tam:tam/samplers",
     "flowgroups": "openconfig-tam:tam/flowgroups",
     "ifa_sessions": "openconfig-tam:tam/ifa-sessions",
+    "vrfs": "sonic-vrf:sonic-vrf/VRF/VRF_LIST",
 }
 
 
@@ -47,8 +49,10 @@ def _normalize_device(host: str, payloads: dict[str, dict[str, Any]]) -> dict[st
         "ifa_status": payloads["ifa_status"].get("openconfig-tam:op-status"),
         "features": _features(payloads["features"]),
         "collectors": _collectors(payloads["collectors"]),
+        "samplers": _samplers(payloads["samplers"]),
         "flowgroups": _flowgroups(payloads["flowgroups"]),
         "ifa_sessions": _ifa_sessions(payloads["ifa_sessions"]),
+        "vrfs": _vrfs(payloads["vrfs"]),
     }
 
 
@@ -81,6 +85,21 @@ def _collectors(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "ip": state.get("ip"),
                 "port": state.get("port"),
                 "protocol": state.get("protocol"),
+                "vrf": state.get("vrf"),
+            }
+        )
+    return rows
+
+
+def _samplers(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    root = payload.get("openconfig-tam:samplers", {})
+    rows = []
+    for item in _list(root, "sampler"):
+        state = _state(item)
+        rows.append(
+            {
+                "name": state.get("name") or item.get("name"),
+                "sampling_rate": state.get("sampling-rate"),
             }
         )
     return rows
@@ -123,6 +142,81 @@ def _ifa_sessions(payload: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def _vrfs(payload: dict[str, Any]) -> list[str]:
+    rows = []
+    for item in _list(payload, "sonic-vrf:VRF_LIST"):
+        name = item.get("vrf_name")
+        if name:
+            rows.append(str(name))
+    return rows
+
+
+def collector_payload(name: str, ip: str, port: int, protocol: str, vrf: str | None = None) -> dict[str, Any]:
+    config: dict[str, Any] = {"name": name, "ip": ip, "port": int(port), "protocol": protocol.upper()}
+    if vrf:
+        config["vrf"] = vrf
+    return {"openconfig-tam:collectors": {"collector": [{"name": name, "config": config}]}}
+
+
+def sampler_payload(name: str, sampling_rate: int) -> dict[str, Any]:
+    return {
+        "openconfig-tam:samplers": {
+            "sampler": [{"name": name, "config": {"name": name, "sampling-rate": int(sampling_rate)}}]
+        }
+    }
+
+
+def flowgroup_payload(
+    name: str,
+    flowgroup_id: int,
+    priority: int,
+    src_ip: str,
+    dst_ip: str,
+    protocol: str,
+) -> dict[str, Any]:
+    return {
+        "openconfig-tam:flowgroups": {
+            "flowgroup": [
+                {
+                    "name": name,
+                    "config": {"name": name, "id": int(flowgroup_id), "priority": int(priority)},
+                    "ipv4": {
+                        "config": {
+                            "source-address": src_ip,
+                            "destination-address": dst_ip,
+                            "protocol": f"IP_{protocol.upper()}",
+                        }
+                    },
+                }
+            ]
+        }
+    }
+
+
+def ifa_session_payload(
+    name: str,
+    flowgroup: str,
+    node_type: str,
+    collector: str | None = None,
+    sampler: str | None = None,
+) -> dict[str, Any]:
+    config = {"name": name, "flowgroup": flowgroup, "node-type": node_type.upper()}
+    if collector:
+        config["collector"] = collector
+    if sampler:
+        config["sample-rate"] = sampler
+    return {"openconfig-tam:ifa-sessions": {"ifa-session": [{"name": name, "config": config}]}}
+
+
+def ifa_feature_payload(status: str) -> dict[str, Any]:
+    status = status.upper()
+    return {
+        "openconfig-tam:features": {
+            "feature": [{"feature-ref": "IFA", "config": {"feature-ref": "IFA", "status": status}}]
+        }
+    }
 
 
 def _list(root: Any, key: str) -> list[dict[str, Any]]:

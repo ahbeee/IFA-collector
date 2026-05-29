@@ -238,6 +238,7 @@ INDEX_HTML = """<!doctype html>
       </div>
       <div class="panel"><h2>Switches</h2><div id="tamSwitches"></div></div>
       <div class="panel"><h2>Collectors</h2><div id="tamCollectors"></div></div>
+      <div class="panel"><h2>Samplers</h2><div id="tamSamplers"></div></div>
       <div class="panel"><h2>Flow Groups</h2><div id="tamFlowgroups"></div></div>
       <div class="panel"><h2>IFA Sessions</h2><div id="tamSessions"></div></div>
     </section>
@@ -392,10 +393,15 @@ INDEX_HTML = """<!doctype html>
         ifa_status: d.ifa_status,
         features: (d.features || []).map(f => `${f.feature}:${f.status}`).join(', ')
       }]);
-      document.getElementById('tamSwitches').innerHTML = table(['Host', 'Switch ID', 'Enterprise ID', 'IFA', 'Features'],
-        switches.map(d => `<tr><td>${esc(d.host)}</td><td>${esc(d.switch_id)}</td><td>${esc(d.enterprise_id)}</td><td>${esc(d.ifa_status)}</td><td>${esc(d.features)}</td></tr>`));
-      document.getElementById('tamCollectors').innerHTML = table(['Host', 'Name', 'IP', 'Port', 'Protocol'],
-        tam.devices.flatMap(d => (d.collectors || []).map(c => `<tr><td>${esc(d.host)}</td><td>${esc(c.name)}</td><td>${esc(c.ip)}</td><td>${esc(c.port)}</td><td>${esc(c.protocol)}</td></tr>`)));
+      document.getElementById('tamSwitches').innerHTML = table(['Host', 'Switch ID', 'Enterprise ID', 'IFA', 'VRFs', 'Features'],
+        switches.map(d => {
+          const source = tam.devices.find(item => item.host === d.host) || {};
+          return `<tr><td>${esc(d.host)}</td><td>${esc(d.switch_id)}</td><td>${esc(d.enterprise_id)}</td><td>${esc(d.ifa_status)}</td><td>${esc((source.vrfs || []).join(', '))}</td><td>${esc(d.features)}</td></tr>`;
+        }));
+      document.getElementById('tamCollectors').innerHTML = table(['Host', 'Name', 'IP', 'Port', 'Protocol', 'VRF'],
+        tam.devices.flatMap(d => (d.collectors || []).map(c => `<tr><td>${esc(d.host)}</td><td>${esc(c.name)}</td><td>${esc(c.ip)}</td><td>${esc(c.port)}</td><td>${esc(c.protocol)}</td><td>${esc(c.vrf || '-')}</td></tr>`)));
+      document.getElementById('tamSamplers').innerHTML = table(['Host', 'Name', 'Sampling Rate'],
+        tam.devices.flatMap(d => (d.samplers || []).map(s => `<tr><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.sampling_rate)}</td></tr>`)));
       document.getElementById('tamFlowgroups').innerHTML = table(['Host', 'Name', 'ID', 'Flow', 'Proto', 'Packets', 'Bytes'],
         tam.devices.flatMap(d => (d.flowgroups || []).map(f => `<tr><td>${esc(d.host)}</td><td>${esc(f.name)}</td><td>${esc(f.id)}</td><td><code>${esc(f.src_ip)} -> ${esc(f.dst_ip)}</code></td><td>${esc(f.protocol)}</td><td>${esc(f.packets)}</td><td>${esc(f.bytes)}</td></tr>`)));
       document.getElementById('tamSessions').innerHTML = table(['Host', 'Name', 'Flow Group', 'Node Type', 'Collector', 'Sampler'],
