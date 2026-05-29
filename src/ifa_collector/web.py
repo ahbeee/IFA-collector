@@ -165,6 +165,24 @@ INDEX_HTML = """<!doctype html>
     .topology-label { font-size: 12px; fill: var(--text); text-anchor: middle; }
     .topology-edge-label { font-size: 11px; fill: var(--muted); text-anchor: middle; }
     .status { padding: 0 14px 12px; color: var(--muted); }
+    .device-list {
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .device-list table input {
+      padding: 6px 7px;
+      font-size: 13px;
+    }
+    .mini {
+      border: 1px solid var(--line);
+      background: white;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 6px 9px;
+      cursor: pointer;
+    }
     pre {
       margin: 0;
       padding: 12px 14px;
@@ -232,6 +250,7 @@ INDEX_HTML = """<!doctype html>
           <textarea id="topoDevices" autocomplete="off" spellcheck="false" placeholder="10.101.110.1,admin,admin&#10;10.101.110.2,admin,admin"></textarea>
           <div class="status" style="padding: 6px 0 0;">One device per line. Used for this scan only; not saved by the app.</div>
           <button id="topoClear" class="secondary" style="margin-top: 8px;">Clear</button>
+          <div id="topoDeviceRows" class="device-list"></div>
         </div>
         <div id="topologyStatus" class="status"></div>
         <div id="topologyGraph" class="topology"></div>
@@ -248,6 +267,7 @@ INDEX_HTML = """<!doctype html>
           <div class="status" style="padding: 6px 0 0;">Used by Read TAM and Apply. Credentials are not persisted.</div>
           <button id="tamRead" class="primary" style="margin-top: 8px;">Read TAM</button>
           <button id="tamClear" class="secondary" style="margin-top: 8px;">Clear</button>
+          <div id="tamDeviceRows" class="device-list"></div>
         </div>
         <div id="tamStatus" class="status"></div>
       </div>
@@ -407,6 +427,45 @@ INDEX_HTML = """<!doctype html>
         return {host: parts[0]?.trim(), username: parts[1]?.trim(), password: parts.slice(2).join(',').trim()};
       }).filter(item => item.host && item.username && item.password);
     }
+    function deviceLines(textareaId) {
+      return String(document.getElementById(textareaId).value || '').split(/\\r?\\n/).map(line => {
+        const parts = line.split(',');
+        return {host: (parts[0] || '').trim(), username: (parts[1] || '').trim(), password: parts.slice(2).join(',').trim()};
+      }).filter(item => item.host || item.username || item.password);
+    }
+    function writeDeviceLines(textareaId, rows) {
+      document.getElementById(textareaId).value = rows.map(row => `${row.host || ''},${row.username || ''},${row.password || ''}`).join('\\n');
+    }
+    function renderDeviceRows(textareaId, containerId) {
+      const rows = deviceLines(textareaId);
+      const container = document.getElementById(containerId);
+      if (!rows.length) {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML = table(['Host', 'Username', 'Password', ''], rows.map((row, i) => `<tr>
+        <td><input data-device-row="${i}" data-device-field="host" value="${esc(row.host)}"></td>
+        <td><input data-device-row="${i}" data-device-field="username" value="${esc(row.username)}"></td>
+        <td><input data-device-row="${i}" data-device-field="password" type="password" value="${esc(row.password)}"></td>
+        <td><button class="mini" data-device-delete="${i}">Delete</button></td>
+      </tr>`));
+      container.querySelectorAll('input[data-device-row]').forEach(input => {
+        input.addEventListener('input', () => {
+          const updated = deviceLines(textareaId);
+          const index = Number(input.dataset.deviceRow);
+          updated[index][input.dataset.deviceField] = input.value;
+          writeDeviceLines(textareaId, updated);
+        });
+      });
+      container.querySelectorAll('button[data-device-delete]').forEach(button => {
+        button.addEventListener('click', () => {
+          const updated = deviceLines(textareaId);
+          updated.splice(Number(button.dataset.deviceDelete), 1);
+          writeDeviceLines(textareaId, updated);
+          renderDeviceRows(textareaId, containerId);
+        });
+      });
+    }
     function flowgroupMatch(f) {
       const parts = [];
       if (f.src_ip || f.dst_ip) parts.push(`${f.src_ip || '*'} -> ${f.dst_ip || '*'}`);
@@ -528,7 +587,11 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('topoUser').value = '';
       document.getElementById('topoPass').value = '';
       document.getElementById('topoDevices').value = '';
+      renderDeviceRows('topoDevices', 'topoDeviceRows');
+      state.topology = { graph: { nodes: [], links: [] }, summary: {}, errors: [] };
+      renderTopology();
     });
+    document.getElementById('topoDevices').addEventListener('input', () => renderDeviceRows('topoDevices', 'topoDeviceRows'));
     document.getElementById('topoScan').addEventListener('click', () => scanTopology().catch(err => {
       document.getElementById('topologyStatus').textContent = err.message || String(err);
     }));
@@ -537,8 +600,12 @@ INDEX_HTML = """<!doctype html>
     }));
     document.getElementById('tamClear').addEventListener('click', () => {
       document.getElementById('tamDevices').value = '';
+      renderDeviceRows('tamDevices', 'tamDeviceRows');
     });
+    document.getElementById('tamDevices').addEventListener('input', () => renderDeviceRows('tamDevices', 'tamDeviceRows'));
     document.getElementById('tamConfigSpec').value = JSON.stringify(defaultTamSpec(), null, 2);
+    renderDeviceRows('topoDevices', 'topoDeviceRows');
+    renderDeviceRows('tamDevices', 'tamDeviceRows');
     document.getElementById('tamPreview').addEventListener('click', () => previewTam().catch(err => {
       document.getElementById('tamPlan').textContent = err.message || String(err);
     }));
