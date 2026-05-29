@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .query import QueryStore
-from .tam import read_tam_devices
+from .tam import apply_tam_plan, preview_tam_plan, read_tam_devices
 from .topology import RestconfAuth, RestconfDevice, load_topology, scan_topology, scan_topology_devices
 
 
@@ -165,6 +165,17 @@ INDEX_HTML = """<!doctype html>
     .topology-label { font-size: 12px; fill: var(--text); text-anchor: middle; }
     .topology-edge-label { font-size: 11px; fill: var(--muted); text-anchor: middle; }
     .status { padding: 0 14px 12px; color: var(--muted); }
+    pre {
+      margin: 0;
+      padding: 12px 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #0f172a;
+      color: #e2e8f0;
+      font: 12px Consolas, monospace;
+      max-height: 420px;
+      overflow: auto;
+    }
     @media (max-width: 900px) {
       .grid { grid-template-columns: 1fr; }
       .toolbar { grid-template-columns: 1fr; }
@@ -241,6 +252,16 @@ INDEX_HTML = """<!doctype html>
       <div class="panel"><h2>Samplers</h2><div id="tamSamplers"></div></div>
       <div class="panel"><h2>Flow Groups</h2><div id="tamFlowgroups"></div></div>
       <div class="panel"><h2>IFA Sessions</h2><div id="tamSessions"></div></div>
+      <div class="panel">
+        <h2>Configuration Preview / Apply</h2>
+        <div style="padding: 12px 14px;">
+          <label for="tamConfigSpec">Config JSON</label>
+          <textarea id="tamConfigSpec" style="min-height: 260px;"></textarea>
+          <button id="tamPreview" class="secondary" style="margin-top: 8px;">Preview</button>
+          <button id="tamApply" class="primary" style="margin-top: 8px;">Apply</button>
+        </div>
+        <pre id="tamPlan">{}</pre>
+      </div>
     </section>
 
     <section id="errors">
@@ -428,6 +449,39 @@ INDEX_HTML = """<!doctype html>
       });
       renderTam();
     }
+    function defaultTamSpec() {
+      return {
+        switch: {switch_id: 1001, enterprise_id: 4434},
+        collectors: [{name: 'ifa_collector', ip: '192.168.100.100', port: 9090, protocol: 'UDP', vrf: 'default'}],
+        samplers: [{name: 'ifa_samp', sampling_rate: 1}],
+        flowgroups: [
+          {name: 's01_to_s02_udp', id: 30, priority: 100, src_ip: '1.1.1.1/32', dst_ip: '4.4.4.4/32', protocol: 'UDP'}
+        ],
+        sessions: [
+          {name: 'ifa_s01_to_s02_UDP', flowgroup: 's01_to_s02_udp', node_type: 'INGRESS', sampler: 'ifa_samp'}
+        ],
+        ifa_status: 'ACTIVE'
+      };
+    }
+    function configSpec() {
+      return JSON.parse(document.getElementById('tamConfigSpec').value || '{}');
+    }
+    async function previewTam() {
+      const plan = await api('/api/tam/preview', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({spec: configSpec()})
+      });
+      document.getElementById('tamPlan').textContent = JSON.stringify(plan, null, 2);
+    }
+    async function applyTam() {
+      const result = await api('/api/tam/apply', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({devices: parseDeviceSpecs(document.getElementById('tamDevices').value), spec: configSpec()})
+      });
+      document.getElementById('tamPlan').textContent = JSON.stringify(result, null, 2);
+    }
     async function loadFlow(flowKey) {
       const data = await api('/api/flow-detail?flow_key=' + encodeURIComponent(flowKey) + '&limit=3');
       const flow = data.flow;
@@ -459,6 +513,13 @@ INDEX_HTML = """<!doctype html>
     }));
     document.getElementById('tamRead').addEventListener('click', () => readTam().catch(err => {
       document.getElementById('tamStatus').textContent = err.message || String(err);
+    }));
+    document.getElementById('tamConfigSpec').value = JSON.stringify(defaultTamSpec(), null, 2);
+    document.getElementById('tamPreview').addEventListener('click', () => previewTam().catch(err => {
+      document.getElementById('tamPlan').textContent = err.message || String(err);
+    }));
+    document.getElementById('tamApply').addEventListener('click', () => applyTam().catch(err => {
+      document.getElementById('tamPlan').textContent = err.message || String(err);
     }));
     loadAll().catch(err => { document.body.innerHTML = '<pre>' + esc(err.stack || err) + '</pre>'; });
   </script>
@@ -531,6 +592,12 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/tam/read":
                     body = self._read_json()
                     self._send_json(read_tam_devices(_web_device_specs(body)))
+                elif parsed.path == "/api/tam/preview":
+                    body = self._read_json()
+                    self._send_json(preview_tam_plan(_spec(body)))
+                elif parsed.path == "/api/tam/apply":
+                    body = self._read_json()
+                    self._send_json(apply_tam_plan(_web_device_specs(body), _spec(body)))
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             except Exception as exc:
@@ -601,3 +668,10 @@ def _web_device_specs(body: dict[str, object]) -> list[RestconfDevice]:
     if not devices:
         raise ValueError("devices must contain host, username, and password")
     return devices
+
+
+def _spec(body: dict[str, object]) -> dict[str, object]:
+    spec = body.get("spec", {})
+    if not isinstance(spec, dict):
+        raise ValueError("spec must be an object")
+    return spec

@@ -64,3 +64,23 @@ Direct RESTCONF write validation notes:
 - One flowgroup cannot be used by multiple IFA sessions on the tested SONiC build.
 - Only one collector can be used by active IFA sessions on the tested SONiC build.
 - Safe delete order is IFA sessions, collectors/samplers, then flowgroups.
+
+The Web UI TAM tab accepts a JSON spec, shows the RESTCONF request preview, and can apply it to the devices listed in the device credentials box. Minimal example:
+
+```json
+{
+  "collectors": [
+    {"name": "ifa_collector", "ip": "192.168.100.100", "port": 9090, "protocol": "UDP", "vrf": "default"}
+  ],
+  "samplers": [
+    {"name": "ifa_samp", "sampling_rate": 1}
+  ],
+  "flowgroups": [
+    {"name": "s01_to_s02_udp", "id": 30, "priority": 100, "src_ip": "1.1.1.1/32", "dst_ip": "4.4.4.4/32", "protocol": "UDP"}
+  ],
+  "sessions": [
+    {"name": "ifa_s01_to_s02_UDP", "flowgroup": "s01_to_s02_udp", "node_type": "INGRESS", "sampler": "ifa_samp"}
+  ],
+  "ifa_status": "ACTIVE"
+}
+```

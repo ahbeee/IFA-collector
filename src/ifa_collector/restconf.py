@@ -26,21 +26,34 @@ class RestconfClient:
         self.timeout = float(timeout)
 
     def get_json(self, path: str) -> dict:
-        url = self._url(path)
-        req = request.Request(url, headers=self._headers(), method="GET")
-        try:
-            with request.urlopen(req, timeout=self.timeout, context=self._ssl_context()) as response:
-                body = response.read().decode("utf-8", errors="replace")
-        except error.HTTPError as exc:
-            details = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"RESTCONF HTTP {exc.code} for {url}: {details}") from exc
-        except Exception as exc:
-            raise RuntimeError(f"RESTCONF request failed for {url}: {exc}") from exc
-
+        body = self._request("GET", path)
         try:
             return json.loads(body)
         except json.JSONDecodeError as exc:
-            raise RuntimeError(f"RESTCONF invalid JSON from {url}") from exc
+            raise RuntimeError(f"RESTCONF invalid JSON from {self._url(path)}") from exc
+
+    def patch_json(self, path: str, payload: dict) -> None:
+        self._request("PATCH", path, payload)
+
+    def delete(self, path: str) -> None:
+        self._request("DELETE", path)
+
+    def _request(self, method: str, path: str, payload: dict | None = None) -> str:
+        url = self._url(path)
+        data = None
+        headers = self._headers()
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            headers["Content-Type"] = "application/yang-data+json"
+        req = request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with request.urlopen(req, timeout=self.timeout, context=self._ssl_context()) as response:
+                return response.read().decode("utf-8", errors="replace")
+        except error.HTTPError as exc:
+            details = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"RESTCONF HTTP {exc.code} {method} for {url}: {details}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"RESTCONF {method} failed for {url}: {exc}") from exc
 
     def _url(self, path: str) -> str:
         normalized = path.strip().lstrip("/")

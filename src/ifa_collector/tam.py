@@ -40,6 +40,45 @@ def read_tam_devices(devices: list[RestconfDevice]) -> dict[str, Any]:
     return {"devices": results, "errors": errors, "summary": {"devices": len(results), "errors": len(errors)}}
 
 
+def preview_tam_plan(spec: dict[str, Any]) -> dict[str, Any]:
+    operations = _build_delete_operations(spec) + _build_set_operations(spec)
+    warnings = _validate_operations(spec)
+    return {"operations": operations, "warnings": warnings, "summary": {"operations": len(operations), "warnings": len(warnings)}}
+
+
+def apply_tam_plan(devices: list[RestconfDevice], spec: dict[str, Any]) -> dict[str, Any]:
+    plan = preview_tam_plan(spec)
+    results = []
+    for device in devices:
+        client = RestconfClient(
+            host=device.host,
+            username=device.auth.username,
+            password=device.auth.password,
+            port=device.auth.port,
+            path_prefix=device.auth.path_prefix,
+            verify_tls=device.auth.verify_tls,
+            timeout=device.auth.timeout,
+        )
+        for op in plan["operations"]:
+            item = {"host": device.host, "method": op["method"], "path": op["path"], "description": op["description"]}
+            try:
+                if op["method"] == "PATCH":
+                    client.patch_json(op["path"], op["payload"])
+                elif op["method"] == "DELETE":
+                    client.delete(op["path"])
+                else:
+                    raise ValueError(f"unsupported method {op['method']}")
+                item["status"] = "ok"
+            except Exception as exc:
+                item["status"] = "error"
+                item["error"] = str(exc)
+            results.append(item)
+            if item["status"] == "error" and not spec.get("continue_on_error", False):
+                break
+    errors = [item for item in results if item.get("status") == "error"]
+    return {"plan": plan, "results": results, "summary": {"requests": len(results), "errors": len(errors)}}
+
+
 def _normalize_device(host: str, payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
     switch_state = _state(payloads["switch"].get("openconfig-tam:switch", {}))
     return {
@@ -54,6 +93,94 @@ def _normalize_device(host: str, payloads: dict[str, dict[str, Any]]) -> dict[st
         "ifa_sessions": _ifa_sessions(payloads["ifa_sessions"]),
         "vrfs": _vrfs(payloads["vrfs"]),
     }
+
+
+def _build_delete_operations(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    deletes = spec.get("delete", {})
+    ops = []
+    for name in deletes.get("sessions", []):
+        ops.append(_delete_op(f"openconfig-tam:tam/ifa-sessions/ifa-session={name}", f"delete IFA session {name}"))
+    for name in deletes.get("collectors", []):
+        ops.append(_delete_op(f"openconfig-tam:tam/collectors/collector={name}", f"delete collector {name}"))
+    for name in deletes.get("samplers", []):
+        ops.append(_delete_op(f"openconfig-tam:tam/samplers/sampler={name}", f"delete sampler {name}"))
+    for name in deletes.get("flowgroups", []):
+        ops.append(_delete_op(f"openconfig-tam:tam/flowgroups/flowgroup={name}", f"delete flowgroup {name}"))
+    if deletes.get("switch_id"):
+        ops.append(_delete_op("openconfig-tam:tam/switch/config/switch-id", "delete switch-id"))
+    if deletes.get("enterprise_id"):
+        ops.append(_delete_op("openconfig-tam:tam/switch/config/enterprise-id", "delete enterprise-id"))
+    return ops
+
+
+def _build_set_operations(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    ops = []
+    switch = spec.get("switch", {})
+    if "switch_id" in switch:
+        ops.append(_patch_op("openconfig-tam:tam/switch/config/switch-id", {"openconfig-tam:switch-id": int(switch["switch_id"])}, "set switch-id"))
+    if "enterprise_id" in switch:
+        ops.append(_patch_op("openconfig-tam:tam/switch/config/enterprise-id", {"openconfig-tam:enterprise-id": int(switch["enterprise_id"])}, "set enterprise-id"))
+    for collector in spec.get("collectors", []):
+        ops.append(
+            _patch_op(
+                "openconfig-tam:tam/collectors",
+                collector_payload(
+                    collector["name"],
+                    collector["ip"],
+                    int(collector["port"]),
+                    collector.get("protocol", "UDP"),
+                    collector.get("vrf"),
+                ),
+                f"set collector {collector['name']}",
+            )
+        )
+    for sampler in spec.get("samplers", []):
+        ops.append(_patch_op("openconfig-tam:tam/samplers", sampler_payload(sampler["name"], int(sampler["sampling_rate"])), f"set sampler {sampler['name']}"))
+    for flowgroup in spec.get("flowgroups", []):
+        ops.append(_patch_op("openconfig-tam:tam/flowgroups", flowgroup_payload(**flowgroup), f"set flowgroup {flowgroup['name']}"))
+    for session in spec.get("sessions", []):
+        ops.append(
+            _patch_op(
+                "openconfig-tam:tam/ifa-sessions",
+                ifa_session_payload(
+                    session["name"],
+                    session["flowgroup"],
+                    session["node_type"],
+                    collector=session.get("collector"),
+                    sampler=session.get("sampler"),
+                ),
+                f"set IFA session {session['name']}",
+            )
+        )
+    if "ifa_status" in spec:
+        ops.append(_patch_op("openconfig-tam:tam/features", ifa_feature_payload(str(spec["ifa_status"])), f"set IFA {spec['ifa_status']}"))
+    return ops
+
+
+def _validate_operations(spec: dict[str, Any]) -> list[str]:
+    warnings = []
+    sessions = spec.get("sessions", [])
+    flowgroups = [session.get("flowgroup") for session in sessions]
+    if len(flowgroups) != len(set(flowgroups)):
+        warnings.append("One flowgroup cannot be used by multiple IFA sessions on the tested SONiC build.")
+    collectors = {session.get("collector") for session in sessions if session.get("collector")}
+    if len(collectors) > 1:
+        warnings.append("Only one collector can be used by active IFA sessions on the tested SONiC build.")
+    for session in sessions:
+        node_type = str(session.get("node_type", "")).upper()
+        if node_type == "INGRESS" and not session.get("sampler"):
+            warnings.append(f"Ingress session {session.get('name')} needs a sampler.")
+        if node_type == "EGRESS" and not session.get("collector"):
+            warnings.append(f"Egress session {session.get('name')} needs a collector.")
+    return warnings
+
+
+def _patch_op(path: str, payload: dict[str, Any], description: str) -> dict[str, Any]:
+    return {"method": "PATCH", "path": path, "payload": payload, "description": description}
+
+
+def _delete_op(path: str, description: str) -> dict[str, Any]:
+    return {"method": "DELETE", "path": path, "payload": None, "description": description}
 
 
 def _state(item: dict[str, Any]) -> dict[str, Any]:
@@ -181,8 +308,8 @@ def sampler_payload(name: str, sampling_rate: int) -> dict[str, Any]:
 
 def flowgroup_payload(
     name: str,
-    flowgroup_id: int,
-    priority: int,
+    flowgroup_id: int | None = None,
+    priority: int = 100,
     src_ip: str | None = None,
     dst_ip: str | None = None,
     protocol: str | None = None,
@@ -194,10 +321,14 @@ def flowgroup_payload(
     l4_dst_port: int | None = None,
     vlan: int | None = None,
     ethertype: str | None = None,
+    id: int | None = None,
 ) -> dict[str, Any]:
+    resolved_id = flowgroup_id if flowgroup_id is not None else id
+    if resolved_id is None:
+        raise ValueError("flowgroup id is required")
     flowgroup: dict[str, Any] = {
         "name": name,
-        "config": {"name": name, "id": int(flowgroup_id), "priority": int(priority)},
+        "config": {"name": name, "id": int(resolved_id), "priority": int(priority)},
     }
     if src_ip or dst_ip or protocol:
         flowgroup["ipv4"] = {
