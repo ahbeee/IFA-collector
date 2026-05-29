@@ -243,6 +243,7 @@ INDEX_HTML = """<!doctype html>
         <div style="padding: 12px 14px;">
           <label for="tamDevices">Devices</label>
           <textarea id="tamDevices" placeholder="10.101.110.1,admin,admin&#10;10.101.110.2,admin,admin&#10;10.101.125.2,admin,password"></textarea>
+          <div class="status" style="padding: 6px 0 0;">Used by Read TAM and Apply. Credentials are not persisted.</div>
           <button id="tamRead" class="primary" style="margin-top: 8px;">Read TAM</button>
         </div>
         <div id="tamStatus" class="status"></div>
@@ -257,6 +258,7 @@ INDEX_HTML = """<!doctype html>
         <div style="padding: 12px 14px;">
           <label for="tamConfigSpec">Config JSON</label>
           <textarea id="tamConfigSpec" style="min-height: 260px;"></textarea>
+          <div class="status" style="padding: 6px 0 0;">Preview builds RESTCONF requests only. Apply sends those requests to the devices listed above.</div>
           <button id="tamPreview" class="secondary" style="margin-top: 8px;">Preview</button>
           <button id="tamApply" class="primary" style="margin-top: 8px;">Apply</button>
         </div>
@@ -442,10 +444,15 @@ INDEX_HTML = """<!doctype html>
     async function readTam() {
       const status = document.getElementById('tamStatus');
       status.textContent = 'Reading TAM state...';
+      const devices = parseDeviceSpecs(document.getElementById('tamDevices').value);
+      if (!devices.length) {
+        status.textContent = 'Enter at least one device as host,username,password.';
+        return;
+      }
       state.tam = await api('/api/tam/read', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({devices: parseDeviceSpecs(document.getElementById('tamDevices').value)})
+        body: JSON.stringify({devices})
       });
       renderTam();
     }
@@ -475,10 +482,15 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('tamPlan').textContent = JSON.stringify(plan, null, 2);
     }
     async function applyTam() {
+      const devices = parseDeviceSpecs(document.getElementById('tamDevices').value);
+      if (!devices.length) {
+        document.getElementById('tamPlan').textContent = 'Enter at least one device as host,username,password.';
+        return;
+      }
       const result = await api('/api/tam/apply', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({devices: parseDeviceSpecs(document.getElementById('tamDevices').value), spec: configSpec()})
+        body: JSON.stringify({devices, spec: configSpec()})
       });
       document.getElementById('tamPlan').textContent = JSON.stringify(result, null, 2);
     }
@@ -557,6 +569,8 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     self._send_json(_query(db_path).flow_detail(flow_key, limit))
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            except ValueError as exc:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
             except Exception as exc:
                 self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
 
@@ -600,6 +614,8 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     self._send_json(apply_tam_plan(_web_device_specs(body), _spec(body)))
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            except ValueError as exc:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
             except Exception as exc:
                 self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
 
