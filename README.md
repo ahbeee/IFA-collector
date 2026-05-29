@@ -27,6 +27,7 @@ python -m ifa_collector.cli query --db .\ifa.sqlite flows --pretty
 python -m ifa_collector.cli query --db .\ifa.sqlite paths --pretty
 python -m ifa_collector.cli scan-topology "10.101.110.1,10.101.110.2" --username admin --password admin --no-ping --output .\topology\topology.json
 python -m ifa_collector.cli scan-topology dummy --device 10.101.110.1,admin,admin --device 10.101.125.2,admin,password --output .\topology\topology.json
+python -m ifa_collector.cli read-tam --device 10.101.110.1,admin,admin --device 10.101.125.2,admin,password
 python -m ifa_collector.cli serve --db .\ifa.sqlite --port 8080 --topology-file .\topology\topology.json
 ```
 
@@ -38,3 +39,12 @@ RESTCONF topology scan currently expects these SONiC paths:
 - `sonic-port:sonic-port/PORT_TABLE`
 - `sonic-portchannel:sonic-portchannel/LAG_TABLE`
 - `openconfig-system:system/state`
+
+RESTCONF TAM/IFA state read currently expects these SONiC paths:
+
+- `openconfig-tam:tam/features-state/feature-state=IFA/state/op-status`
+- `openconfig-tam:tam/features-state/feature-state`
+- `openconfig-tam:tam/switch`
+- `openconfig-tam:tam/collectors`
+- `openconfig-tam:tam/flowgroups`
+- `openconfig-tam:tam/ifa-sessions`

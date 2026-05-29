@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .query import QueryStore
+from .tam import read_tam_devices
 from .topology import RestconfAuth, RestconfDevice, load_topology, scan_topology, scan_topology_devices
 
 
@@ -183,6 +184,7 @@ INDEX_HTML = """<!doctype html>
       <button data-tab="flows">Flows</button>
       <button data-tab="paths">Paths</button>
       <button data-tab="topology">Topology</button>
+      <button data-tab="tam">TAM</button>
       <button data-tab="errors">Diagnostics</button>
     </div>
 
@@ -224,12 +226,28 @@ INDEX_HTML = """<!doctype html>
       <div class="panel"><h2>LLDP Links</h2><div id="topologyLinks"></div></div>
     </section>
 
+    <section id="tam">
+      <div class="panel">
+        <h2>TAM / IFA State</h2>
+        <div style="padding: 12px 14px;">
+          <label for="tamDevices">Devices</label>
+          <textarea id="tamDevices" placeholder="10.101.110.1,admin,admin&#10;10.101.110.2,admin,admin&#10;10.101.125.2,admin,password"></textarea>
+          <button id="tamRead" class="primary" style="margin-top: 8px;">Read TAM</button>
+        </div>
+        <div id="tamStatus" class="status"></div>
+      </div>
+      <div class="panel"><h2>Switches</h2><div id="tamSwitches"></div></div>
+      <div class="panel"><h2>Collectors</h2><div id="tamCollectors"></div></div>
+      <div class="panel"><h2>Flow Groups</h2><div id="tamFlowgroups"></div></div>
+      <div class="panel"><h2>IFA Sessions</h2><div id="tamSessions"></div></div>
+    </section>
+
     <section id="errors">
       <div class="panel"><h2>Parse Errors</h2><div id="errorsTable"></div></div>
     </section>
   </main>
   <script>
-    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null };
+    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null };
 
     async function api(path, options) {
       const res = await fetch(path, options);
@@ -265,6 +283,7 @@ INDEX_HTML = """<!doctype html>
       renderFlows();
       renderPaths();
       renderTopology();
+      renderTam();
       renderErrors();
     }
     function renderExporters() {
@@ -361,6 +380,37 @@ INDEX_HTML = """<!doctype html>
         return {host: parts[0]?.trim(), username: parts[1]?.trim(), password: parts.slice(2).join(',').trim()};
       }).filter(item => item.host && item.username && item.password);
     }
+    function renderTam() {
+      const tam = state.tam || { devices: [], errors: [] };
+      document.getElementById('tamStatus').textContent = tam.summary
+        ? `${tam.summary.devices} devices, ${tam.summary.errors} errors`
+        : 'No TAM state loaded.';
+      const switches = tam.devices.flatMap(d => [{
+        host: d.host,
+        switch_id: d.switch_id,
+        enterprise_id: d.enterprise_id,
+        ifa_status: d.ifa_status,
+        features: (d.features || []).map(f => `${f.feature}:${f.status}`).join(', ')
+      }]);
+      document.getElementById('tamSwitches').innerHTML = table(['Host', 'Switch ID', 'Enterprise ID', 'IFA', 'Features'],
+        switches.map(d => `<tr><td>${esc(d.host)}</td><td>${esc(d.switch_id)}</td><td>${esc(d.enterprise_id)}</td><td>${esc(d.ifa_status)}</td><td>${esc(d.features)}</td></tr>`));
+      document.getElementById('tamCollectors').innerHTML = table(['Host', 'Name', 'IP', 'Port', 'Protocol'],
+        tam.devices.flatMap(d => (d.collectors || []).map(c => `<tr><td>${esc(d.host)}</td><td>${esc(c.name)}</td><td>${esc(c.ip)}</td><td>${esc(c.port)}</td><td>${esc(c.protocol)}</td></tr>`)));
+      document.getElementById('tamFlowgroups').innerHTML = table(['Host', 'Name', 'ID', 'Flow', 'Proto', 'Packets', 'Bytes'],
+        tam.devices.flatMap(d => (d.flowgroups || []).map(f => `<tr><td>${esc(d.host)}</td><td>${esc(f.name)}</td><td>${esc(f.id)}</td><td><code>${esc(f.src_ip)} -> ${esc(f.dst_ip)}</code></td><td>${esc(f.protocol)}</td><td>${esc(f.packets)}</td><td>${esc(f.bytes)}</td></tr>`)));
+      document.getElementById('tamSessions').innerHTML = table(['Host', 'Name', 'Flow Group', 'Node Type', 'Collector', 'Sampler'],
+        tam.devices.flatMap(d => (d.ifa_sessions || []).map(s => `<tr><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.flowgroup)}</td><td>${esc(s.node_type)}</td><td>${esc(s.collector || '-')}</td><td>${esc(s.sampler || '-')}</td></tr>`)));
+    }
+    async function readTam() {
+      const status = document.getElementById('tamStatus');
+      status.textContent = 'Reading TAM state...';
+      state.tam = await api('/api/tam/read', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({devices: parseDeviceSpecs(document.getElementById('tamDevices').value)})
+      });
+      renderTam();
+    }
     async function loadFlow(flowKey) {
       const data = await api('/api/flow-detail?flow_key=' + encodeURIComponent(flowKey) + '&limit=3');
       const flow = data.flow;
@@ -389,6 +439,9 @@ INDEX_HTML = """<!doctype html>
     });
     document.getElementById('topoScan').addEventListener('click', () => scanTopology().catch(err => {
       document.getElementById('topologyStatus').textContent = err.message || String(err);
+    }));
+    document.getElementById('tamRead').addEventListener('click', () => readTam().catch(err => {
+      document.getElementById('tamStatus').textContent = err.message || String(err);
     }));
     loadAll().catch(err => { document.body.innerHTML = '<pre>' + esc(err.stack || err) + '</pre>'; });
   </script>
@@ -458,6 +511,9 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                                 ping_timeout_ms=int(body.get("ping_timeout_ms", 500)),
                             )
                         )
+                elif parsed.path == "/api/tam/read":
+                    body = self._read_json()
+                    self._send_json(read_tam_devices(_web_device_specs(body)))
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             except Exception as exc:

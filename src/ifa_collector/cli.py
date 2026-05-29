@@ -14,6 +14,7 @@ from .pcap import read_pcap
 from .query import QueryStore
 from .schema import SchemaRegistry
 from .storage import SqliteStore
+from .tam import read_tam_devices
 from .topology import RestconfAuth, RestconfDevice, scan_topology, scan_topology_devices
 from .web import serve
 
@@ -85,6 +86,18 @@ def main() -> None:
         help="scan one device with explicit credentials: host,username,password; may be repeated",
     )
 
+    read_tam_cmd = subparsers.add_parser("read-tam", help="read SONiC OpenConfig TAM/IFA state")
+    read_tam_cmd.add_argument("--rest-port", type=int, default=443)
+    read_tam_cmd.add_argument("--path-prefix", default="/restconf/data")
+    read_tam_cmd.add_argument("--verify-tls", action="store_true")
+    read_tam_cmd.add_argument("--timeout", type=float, default=10)
+    read_tam_cmd.add_argument(
+        "--device",
+        action="append",
+        required=True,
+        help="read one device with explicit credentials: host,username,password; may be repeated",
+    )
+
     args = parser.parse_args()
     registry = _load_registry(args.schema_dir)
 
@@ -120,8 +133,10 @@ def main() -> None:
                 args.output,
                 ping_first=not args.no_ping,
                 ping_timeout_ms=args.ping_timeout_ms,
-            )
+        )
         _emit({"output": str(args.output), "summary": payload["summary"], "errors": payload["errors"]}, pretty=True)
+    elif args.command == "read-tam":
+        _emit(read_tam_devices(_device_specs(args)), pretty=True)
 
 
 def _load_registry(paths: list[Path]) -> SchemaRegistry:
