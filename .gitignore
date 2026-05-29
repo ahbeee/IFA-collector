@@ -16,6 +16,7 @@ venv/
 *.sqlite3-wal
 *.db
 *.pdf
+topology/*.json
 
 .env
 .DS_Store

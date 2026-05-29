@@ -14,6 +14,7 @@ from .pcap import read_pcap
 from .query import QueryStore
 from .schema import SchemaRegistry
 from .storage import SqliteStore
+from .topology import RestconfAuth, RestconfDevice, scan_topology, scan_topology_devices
 from .web import serve
 
 
@@ -64,6 +65,25 @@ def main() -> None:
     serve_cmd.add_argument("--db", type=Path, required=True)
     serve_cmd.add_argument("--host", default="127.0.0.1")
     serve_cmd.add_argument("--port", type=int, default=8080)
+    serve_cmd.add_argument("--topology-file", type=Path, default=Path("topology/topology.json"))
+
+    scan_topology_cmd = subparsers.add_parser("scan-topology", help="scan SONiC RESTCONF LLDP topology")
+    scan_topology_cmd.add_argument("targets", help="IP, CIDR, range, or comma/space separated targets")
+    scan_topology_cmd.add_argument("--username")
+    scan_topology_cmd.add_argument("--password")
+    scan_topology_cmd.add_argument("--rest-port", type=int, default=443)
+    scan_topology_cmd.add_argument("--path-prefix", default="/restconf/data")
+    scan_topology_cmd.add_argument("--verify-tls", action="store_true")
+    scan_topology_cmd.add_argument("--timeout", type=float, default=10)
+    scan_topology_cmd.add_argument("--no-ping", action="store_true", help="skip ICMP reachability check before RESTCONF")
+    scan_topology_cmd.add_argument("--ping-timeout-ms", type=int, default=500)
+    scan_topology_cmd.add_argument("--output", type=Path, default=Path("topology/topology.json"))
+    scan_topology_cmd.add_argument(
+        "--device",
+        action="append",
+        default=[],
+        help="scan one device with explicit credentials: host,username,password; may be repeated",
+    )
 
     args = parser.parse_args()
     registry = _load_registry(args.schema_dir)
@@ -79,7 +99,29 @@ def main() -> None:
     elif args.command == "query":
         _query_db(args)
     elif args.command == "serve":
-        serve(args.db, args.host, args.port)
+        serve(args.db, args.host, args.port, args.topology_file)
+    elif args.command == "scan-topology":
+        if args.device:
+            payload = scan_topology_devices(_device_specs(args), args.output)
+        else:
+            if not args.username or not args.password:
+                raise ValueError("--username and --password are required unless --device is used")
+            auth = RestconfAuth(
+                username=args.username,
+                password=args.password,
+                port=args.rest_port,
+                path_prefix=args.path_prefix,
+                verify_tls=args.verify_tls,
+                timeout=args.timeout,
+            )
+            payload = scan_topology(
+                args.targets,
+                auth,
+                args.output,
+                ping_first=not args.no_ping,
+                ping_timeout_ms=args.ping_timeout_ms,
+            )
+        _emit({"output": str(args.output), "summary": payload["summary"], "errors": payload["errors"]}, pretty=True)
 
 
 def _load_registry(paths: list[Path]) -> SchemaRegistry:
@@ -330,6 +372,28 @@ def _exporter_key(wrapper: dict[str, Any]) -> str:
 
 def _emit(payload: dict[str, Any], pretty: bool) -> None:
     print(json.dumps(payload, indent=2 if pretty else None, sort_keys=True))
+
+
+def _device_specs(args: Any) -> list[RestconfDevice]:
+    devices = []
+    for spec in args.device:
+        parts = [part.strip() for part in spec.split(",", 2)]
+        if len(parts) != 3 or not all(parts):
+            raise ValueError("--device must be host,username,password")
+        devices.append(
+            RestconfDevice(
+                host=parts[0],
+                auth=RestconfAuth(
+                    username=parts[1],
+                    password=parts[2],
+                    port=args.rest_port,
+                    path_prefix=args.path_prefix,
+                    verify_tls=args.verify_tls,
+                    timeout=args.timeout,
+                ),
+            )
+        )
+    return devices
 
 
 def _resolved_path_key(hops: list[Any], inventory: Inventory) -> str:

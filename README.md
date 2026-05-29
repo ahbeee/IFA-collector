@@ -12,6 +12,8 @@ Current scope:
 - Raw metadata fallback when no schema matches.
 - Aruba AOS-CX GNS `0xF` / LNS `1` metadata schema.
 - Broadcom SONiC IPFIX-over-UDP collector wrapper detection.
+- RESTCONF topology scan from SONiC LLDP, port, LAG, and system state.
+- Web UI topology tab with RESTCONF scan and stored topology rendering.
 
 Example:
 
@@ -23,7 +25,16 @@ python -m ifa_collector.cli ingest-pcap .\sample.pcap --inventory .\inventory\la
 python -m ifa_collector.cli query --db .\ifa.sqlite exporters --pretty
 python -m ifa_collector.cli query --db .\ifa.sqlite flows --pretty
 python -m ifa_collector.cli query --db .\ifa.sqlite paths --pretty
-python -m ifa_collector.cli serve --db .\ifa.sqlite --port 8080
+python -m ifa_collector.cli scan-topology "10.101.110.1,10.101.110.2" --username admin --password admin --no-ping --output .\topology\topology.json
+python -m ifa_collector.cli scan-topology dummy --device 10.101.110.1,admin,admin --device 10.101.125.2,admin,password --output .\topology\topology.json
+python -m ifa_collector.cli serve --db .\ifa.sqlite --port 8080 --topology-file .\topology\topology.json
 ```
 
 The built-in schemas are intentionally examples. Real production accuracy depends on the switch vendor/model metadata format and collector export format.
+
+RESTCONF topology scan currently expects these SONiC paths:
+
+- `openconfig-lldp:lldp/interfaces`
+- `sonic-port:sonic-port/PORT_TABLE`
+- `sonic-portchannel:sonic-portchannel/LAG_TABLE`
+- `openconfig-system:system/state`
