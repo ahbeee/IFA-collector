@@ -6,7 +6,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from .ingest import UdpIngestCollector, ingest_pcap
+from .inventory import Inventory
 from .query import QueryStore
+from .schema import SchemaRegistry
 from .tam import apply_tam_plan, preview_tam_plan, read_tam_devices
 from .topology import RestconfAuth, RestconfDevice, load_topology, scan_topology, scan_topology_devices, scan_topology_target_specs
 
@@ -167,7 +170,9 @@ INDEX_HTML = """<!doctype html>
       background: #fbfcfd;
     }
     .topology-line { stroke: #94a3b8; stroke-width: 2; }
+    .topology-line.active-path { stroke: var(--accent); stroke-width: 4; }
     .topology-node { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+    .topology-node.active-node { fill: #ccfbf1; stroke-width: 3; }
     .topology-label { font-size: 12px; fill: var(--text); text-anchor: middle; }
     .topology-edge-label { font-size: 11px; fill: var(--muted); text-anchor: middle; }
     .status { padding: 0 14px 12px; color: var(--muted); }
@@ -217,6 +222,9 @@ INDEX_HTML = """<!doctype html>
       padding: 6px 9px;
       cursor: pointer;
     }
+    .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; padding: 12px 14px; }
+    .inline-actions > div { min-width: 180px; flex: 1; }
+    .kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 12px; padding: 12px 14px; }
     pre {
       margin: 0;
       padding: 12px 14px;
@@ -259,6 +267,25 @@ INDEX_HTML = """<!doctype html>
         <div class="metric"><div class="label">Flows</div><div class="value" id="mFlows">-</div></div>
         <div class="metric"><div class="label">Sequence Gaps</div><div class="value" id="mGaps">-</div></div>
       </div>
+      <div class="panel">
+        <h2>PCAP Import</h2>
+        <div class="inline-actions">
+          <div><label for="pcapPath">Local PCAP Path</label><input id="pcapPath" placeholder="C:\\captures\\ifa_udp.pcap"></div>
+          <button id="pcapImport" class="primary">Import</button>
+          <button id="refreshData" class="secondary">Refresh Data</button>
+        </div>
+        <div id="pcapStatus" class="status">Import writes parsed IFA records into the active SQLite database.</div>
+      </div>
+      <div class="panel">
+        <h2>Live Collector</h2>
+        <div class="inline-actions">
+          <div><label for="collectorHost">Listen IP</label><input id="collectorHost" value="0.0.0.0"></div>
+          <div><label for="collectorPort">UDP Port</label><input id="collectorPort" type="number" value="9090"></div>
+          <button id="collectorStart" class="primary">Start</button>
+          <button id="collectorStop" class="secondary">Stop</button>
+        </div>
+        <div id="collectorStatus" class="status">Collector status not loaded.</div>
+      </div>
       <div class="panel"><h2>Exporters</h2><div id="exportersTable"></div></div>
     </section>
 
@@ -269,6 +296,7 @@ INDEX_HTML = """<!doctype html>
 
     <section id="paths">
       <div class="panel"><h2>Paths</h2><div id="pathsTable"></div></div>
+      <div class="panel"><h2>Path Detail</h2><div id="pathDetail" class="detail">Select a path.</div></div>
     </section>
 
     <section id="topology">
@@ -291,6 +319,7 @@ INDEX_HTML = """<!doctype html>
         </div>
         <div id="topologyGraph" class="topology"></div>
       </div>
+      <div class="panel"><h2>Selected Node</h2><div id="topologyNodeDetail" class="detail">Select a topology node.</div></div>
       <div class="panel"><h2>LLDP Links</h2><div id="topologyLinks"></div></div>
     </section>
 
@@ -376,6 +405,7 @@ INDEX_HTML = """<!doctype html>
           <div class="status" style="padding: 6px 0 0;">Changes are queued locally. Preview builds RESTCONF requests only. Apply sends them to the selected device.</div>
           <button id="tamPreview" class="secondary" style="margin-top: 8px;">Preview</button>
           <button id="tamApply" class="primary" style="margin-top: 8px;">Apply</button>
+          <button id="tamClearSuccess" class="secondary" style="margin-top: 8px;">Clear Successful</button>
           <button id="tamClearPending" class="secondary" style="margin-top: 8px;">Clear Pending</button>
         </div>
         <pre id="tamPending">No pending changes.</pre>
@@ -388,7 +418,11 @@ INDEX_HTML = """<!doctype html>
     </section>
   </main>
   <script>
-    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null, devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [] };
+    const state = {
+      exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null,
+      devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
+      collector: null, selectedTopologyNode: null, selectedPath: null
+    };
 
     async function api(path, options) {
       const res = await fetch(path, options);
@@ -422,15 +456,31 @@ INDEX_HTML = """<!doctype html>
       const info = deviceInfo(host);
       return info.hostname ? `${info.hostname} (${host})` : host;
     }
+    function hopDeviceDisplay(hop) {
+      if (hop.device_name) return hop.device_name;
+      const tamDevice = (state.tam?.devices || []).find(d => String(d.switch_id) === String(hop.device_id));
+      if (tamDevice) return `${deviceDisplay(tamDevice.host)} / switch-id ${hop.device_id}`;
+      return hop.device_id || '-';
+    }
+    function parsePathNodes(pathText) {
+      return String(pathText || '').split(' -> ').map(part => {
+        const index = part.indexOf('(');
+        return (index >= 0 ? part.slice(0, index) : part).trim();
+      }).filter(Boolean);
+    }
+    function formatTime(epochSeconds) {
+      return epochSeconds ? new Date(epochSeconds * 1000).toLocaleString() : '-';
+    }
     async function loadAll() {
-      const [exporters, flows, paths, errors, topology] = await Promise.all([
-        api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/errors'), api('/api/topology')
+      const [exporters, flows, paths, errors, topology, collector] = await Promise.all([
+        api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/errors'), api('/api/topology'), api('/api/collector/status')
       ]);
       state.exporters = exporters.exporters;
       state.flows = flows.flows;
       state.paths = paths.paths;
       state.errors = errors.errors;
       state.topology = topology;
+      state.collector = collector;
       render();
     }
     function render() {
@@ -443,6 +493,7 @@ INDEX_HTML = """<!doctype html>
       renderTopology();
       renderTam();
       renderErrors();
+      renderCollector();
     }
     function renderExporters() {
       const rows = state.exporters.map(e => `<tr>
@@ -467,7 +518,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('flowsTable').innerHTML = table(['Flow', 'Proto', 'Records', 'Paths', 'Hops', 'Last Seen ns', 'Key'], rows);
     }
     function renderPaths() {
-      const rows = state.paths.map(p => `<tr>
+      const rows = state.paths.map(p => `<tr class="clickable" onclick="selectPath(${JSON.stringify(p.resolved_traffic_path).replace(/"/g, '&quot;')})">
         <td class="path">${esc(p.resolved_traffic_path)}</td>
         <td><code>${esc(p.traffic_path)}</code></td>
         <td><code>${esc(p.metadata_path)}</code></td>
@@ -476,6 +527,33 @@ INDEX_HTML = """<!doctype html>
         <td>${esc(p.records)}</td>
       </tr>`);
       document.getElementById('pathsTable').innerHTML = table(['Resolved Traffic Path', 'Traffic Order', 'Metadata Order', 'Flows', 'Hops', 'Records'], rows);
+    }
+    function selectPath(pathText) {
+      const row = state.paths.find(p => p.resolved_traffic_path === pathText) || {};
+      state.selectedPath = pathText;
+      const nodes = parsePathNodes(pathText);
+      document.getElementById('pathDetail').innerHTML = `<div class="kv">
+        <strong>Resolved</strong><code>${esc(pathText)}</code>
+        <strong>Traffic IDs</strong><code>${esc(row.traffic_path || '-')}</code>
+        <strong>Metadata IDs</strong><code>${esc(row.metadata_path || '-')}</code>
+        <strong>Nodes</strong><span>${esc(nodes.join(' -> ') || '-')}</span>
+        <strong>Records</strong><span>${esc(row.records || 0)}</span>
+      </div>`;
+      renderTopology();
+      document.querySelector('[data-tab="paths"]').click();
+    }
+    function renderCollector() {
+      const c = state.collector || {};
+      document.getElementById('collectorStatus').innerHTML = `<div class="kv">
+        <strong>Status</strong><span class="${c.running ? '' : 'warn'}">${c.running ? 'Running' : 'Stopped'}</span>
+        <strong>Listen</strong><code>${esc(c.host || '-')} : ${esc(c.port || '-')}</code>
+        <strong>Packets</strong><span>${esc(c.packets || 0)}</span>
+        <strong>Parsed IFA Records</strong><span>${esc(c.parsed_ifa_records || 0)}</span>
+        <strong>Parse Errors</strong><span class="${c.parse_errors ? 'bad' : ''}">${esc(c.parse_errors || 0)}</span>
+        <strong>Last Packet</strong><span>${esc(formatTime(c.last_packet_time))}</span>
+        <strong>Last Peer</strong><span>${esc(c.last_peer || '-')}</span>
+        <strong>Last Error</strong><span>${esc(c.last_error || '-')}</span>
+      </div>`;
     }
     function renderErrors() {
       const rows = state.errors.map(e => `<tr><td>${esc(e.error)}</td><td>${esc(e.occurrences)}</td></tr>`);
@@ -497,6 +575,13 @@ INDEX_HTML = """<!doctype html>
       const width = 1000, height = 460, cx = width / 2, cy = height / 2;
       const radius = Math.max(120, Math.min(360, 120 + nodes.length * 18));
       const pos = {};
+      const selectedPathNodes = parsePathNodes(state.selectedPath);
+      const selectedEdges = new Set();
+      selectedPathNodes.forEach((node, index) => {
+        if (index < selectedPathNodes.length - 1) {
+          selectedEdges.add([node, selectedPathNodes[index + 1]].sort().join('||'));
+        }
+      });
       nodes.forEach((n, i) => {
         const a = (-Math.PI / 2) + (Math.PI * 2 * i / nodes.length);
         pos[n.id] = { x: cx + Math.cos(a) * radius, y: cy + Math.sin(a) * Math.min(radius, 170) };
@@ -504,18 +589,46 @@ INDEX_HTML = """<!doctype html>
       const edgeSvg = links.map(l => {
         const s = pos[l.source], t = pos[l.target];
         if (!s || !t) return '';
+        const active = selectedEdges.has([l.source, l.target].sort().join('||'));
         const label = `${(l.source_interfaces || []).join(',')} - ${(l.target_interfaces || []).join(',')}`;
-        return `<line class="topology-line" x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}"><title>${esc(label)}</title></line>
+        return `<line class="topology-line ${active ? 'active-path' : ''}" x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}"><title>${esc(label)}</title></line>
           <text class="topology-edge-label" x="${(s.x + t.x) / 2}" y="${(s.y + t.y) / 2 - 6}">${esc(label)}</text>`;
       }).join('');
       const nodeSvg = nodes.map(n => {
         const p = pos[n.id];
-        return `<g><circle class="topology-node" cx="${p.x}" cy="${p.y}" r="34"><title>${esc(n.label || n.id)}</title></circle>
+        const active = n.id === state.selectedTopologyNode || selectedPathNodes.includes(n.id);
+        return `<g class="clickable" onclick="selectTopologyNode(${JSON.stringify(n.id).replace(/"/g, '&quot;')})"><circle class="topology-node ${active ? 'active-node' : ''}" cx="${p.x}" cy="${p.y}" r="34"><title>${esc(n.label || n.id)}</title></circle>
           <text class="topology-label" x="${p.x}" y="${p.y + 4}">${esc(shortLabel(n.id))}</text></g>`;
       }).join('');
       document.getElementById('topologyGraph').innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img">${edgeSvg}${nodeSvg}</svg>`;
       const rows = links.map(l => `<tr><td>${esc(l.source)} -> ${esc(l.target)}</td><td>${esc((l.source_interfaces || []).join(','))} / ${esc((l.target_interfaces || []).join(','))}</td><td>${esc(l.speed)}</td></tr>`);
       document.getElementById('topologyLinks').innerHTML = table(['Link', 'Interfaces', 'Speed'], rows);
+      renderTopologyNodeDetail();
+    }
+    function selectTopologyNode(nodeId) {
+      state.selectedTopologyNode = nodeId;
+      renderTopology();
+    }
+    function renderTopologyNodeDetail() {
+      const nodes = state.topology?.graph?.nodes || [];
+      const interfaces = state.topology?.interfaces || {};
+      const neighbors = state.topology?.neighborships || {};
+      const node = nodes.find(n => n.id === state.selectedTopologyNode);
+      if (!node) {
+        document.getElementById('topologyNodeDetail').textContent = 'Select a topology node.';
+        return;
+      }
+      const tamDevice = (state.tam?.devices || []).find(d => d.host === node.ip || deviceDisplay(d.host).startsWith(node.id));
+      const ports = interfaces[node.id] || [];
+      const portRows = ports.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.oper_status)}</td><td>${esc(p.speed)}</td><td>${esc(p.mac || '-')}</td></tr>`);
+      document.getElementById('topologyNodeDetail').innerHTML = `<div class="kv">
+        <strong>Node</strong><span>${esc(node.id)}</span>
+        <strong>IP</strong><code>${esc(node.ip || '-')}</code>
+        <strong>Switch ID</strong><span>${esc(tamDevice?.switch_id || '-')}</span>
+        <strong>Enterprise ID</strong><span>${esc(tamDevice?.enterprise_id || '-')}</span>
+        <strong>IFA</strong><span>${esc(tamDevice?.ifa_status || '-')}</span>
+        <strong>Neighbors</strong><span>${esc((neighbors[node.id] || []).map(n => `${n.local_interface}->${n.neighbor}`).join(', ') || '-')}</span>
+      </div>${table(['Interface', 'Oper', 'Speed', 'MAC'], portRows)}`;
     }
     function shortLabel(text) {
       text = String(text || '');
@@ -539,6 +652,42 @@ INDEX_HTML = """<!doctype html>
       updateDeviceHostnames();
       renderSharedDeviceRows();
       renderTopology();
+    }
+    async function importPcap() {
+      const path = document.getElementById('pcapPath').value.trim();
+      const status = document.getElementById('pcapStatus');
+      if (!path) {
+        status.textContent = 'Enter a local PCAP path before importing.';
+        return;
+      }
+      status.textContent = 'Importing PCAP...';
+      const result = await api('/api/pcap/ingest', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path})
+      });
+      status.textContent = `Imported ${result.parsed_ifa_records || 0} IFA record(s), ${result.parse_errors || 0} parse error(s).`;
+      await loadAll();
+    }
+    async function startCollector() {
+      state.collector = await api('/api/collector/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          host: document.getElementById('collectorHost').value.trim() || '0.0.0.0',
+          port: Number(document.getElementById('collectorPort').value || 0)
+        })
+      });
+      renderCollector();
+    }
+    async function stopCollector() {
+      state.collector = await api('/api/collector/stop', {method: 'POST'});
+      renderCollector();
+      await loadAll();
+    }
+    async function refreshCollectorStatus() {
+      state.collector = await api('/api/collector/status');
+      renderCollector();
     }
     function splitTargets(text) {
       return String(text || '').split(/[\\s,]+/).map(item => item.trim()).filter(Boolean);
@@ -667,7 +816,7 @@ INDEX_HTML = """<!doctype html>
       const controls = rows.length
         ? `<div class="table-actions"><button class="mini" data-delete-kind="${kind}">Queue Selected Deletes</button></div>`
         : '';
-      return controls + table(['Delete', ...headers], rows);
+      return controls + table(['Delete', 'Edit', ...headers], rows);
     }
     function renderTam() {
       const tam = state.tam || { devices: [], errors: [] };
@@ -687,15 +836,18 @@ INDEX_HTML = """<!doctype html>
           return `<tr><td>${esc(deviceDisplay(d.host))}</td><td>${esc(d.switch_id)}</td><td>${esc(d.enterprise_id)}</td><td>${esc(d.ifa_status)}</td><td>${esc((source.vrfs || []).join(', '))}</td><td>${esc(d.features)}</td></tr>`;
         }));
       document.getElementById('tamCollectors').innerHTML = tableWithActions('collectors', ['Host', 'Name', 'IP', 'Port', 'Protocol', 'VRF'],
-        tam.devices.flatMap(d => (d.collectors || []).map(c => `<tr><td><input type="checkbox" data-tam-delete="collectors" value="${esc(c.name)}"></td><td>${esc(d.host)}</td><td>${esc(c.name)}</td><td>${esc(c.ip)}</td><td>${esc(c.port)}</td><td>${esc(c.protocol)}</td><td>${esc(c.vrf || '-')}</td></tr>`)));
+        tam.devices.flatMap(d => (d.collectors || []).map(c => `<tr><td><input type="checkbox" data-tam-delete="collectors" value="${esc(c.name)}"></td><td><button class="mini" data-tam-edit="collectors" data-tam-name="${esc(c.name)}">Edit</button></td><td>${esc(d.host)}</td><td>${esc(c.name)}</td><td>${esc(c.ip)}</td><td>${esc(c.port)}</td><td>${esc(c.protocol)}</td><td>${esc(c.vrf || '-')}</td></tr>`)));
       document.getElementById('tamSamplers').innerHTML = tableWithActions('samplers', ['Host', 'Name', 'Sampling Rate'],
-        tam.devices.flatMap(d => (d.samplers || []).map(s => `<tr><td><input type="checkbox" data-tam-delete="samplers" value="${esc(s.name)}"></td><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.sampling_rate)}</td></tr>`)));
+        tam.devices.flatMap(d => (d.samplers || []).map(s => `<tr><td><input type="checkbox" data-tam-delete="samplers" value="${esc(s.name)}"></td><td><button class="mini" data-tam-edit="samplers" data-tam-name="${esc(s.name)}">Edit</button></td><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.sampling_rate)}</td></tr>`)));
       document.getElementById('tamFlowgroups').innerHTML = tableWithActions('flowgroups', ['Host', 'Name', 'ID', 'Match', 'Packets', 'Bytes'],
-        tam.devices.flatMap(d => (d.flowgroups || []).map(f => `<tr><td><input type="checkbox" data-tam-delete="flowgroups" value="${esc(f.name)}"></td><td>${esc(d.host)}</td><td>${esc(f.name)}</td><td>${esc(f.id)}</td><td><code>${esc(flowgroupMatch(f))}</code></td><td>${esc(f.packets)}</td><td>${esc(f.bytes)}</td></tr>`)));
+        tam.devices.flatMap(d => (d.flowgroups || []).map(f => `<tr><td><input type="checkbox" data-tam-delete="flowgroups" value="${esc(f.name)}"></td><td><button class="mini" data-tam-edit="flowgroups" data-tam-name="${esc(f.name)}">Edit</button></td><td>${esc(d.host)}</td><td>${esc(f.name)}</td><td>${esc(f.id)}</td><td><code>${esc(flowgroupMatch(f))}</code></td><td>${esc(f.packets)}</td><td>${esc(f.bytes)}</td></tr>`)));
       document.getElementById('tamSessions').innerHTML = tableWithActions('sessions', ['Host', 'Name', 'Flow Group', 'Node Type', 'Collector', 'Sampler'],
-        tam.devices.flatMap(d => (d.ifa_sessions || []).map(s => `<tr><td><input type="checkbox" data-tam-delete="sessions" value="${esc(s.name)}"></td><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.flowgroup)}</td><td>${esc(s.node_type)}</td><td>${esc(s.collector || '-')}</td><td>${esc(s.sampler || '-')}</td></tr>`)));
+        tam.devices.flatMap(d => (d.ifa_sessions || []).map(s => `<tr><td><input type="checkbox" data-tam-delete="sessions" value="${esc(s.name)}"></td><td><button class="mini" data-tam-edit="sessions" data-tam-name="${esc(s.name)}">Edit</button></td><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.flowgroup)}</td><td>${esc(s.node_type)}</td><td>${esc(s.collector || '-')}</td><td>${esc(s.sampler || '-')}</td></tr>`)));
       document.querySelectorAll('button[data-delete-kind]').forEach(button => {
         button.addEventListener('click', () => queueSelectedDeletes(button.dataset.deleteKind));
+      });
+      document.querySelectorAll('button[data-tam-edit]').forEach(button => {
+        button.addEventListener('click', () => populateTamEdit(button.dataset.tamEdit, button.dataset.tamName));
       });
       renderTamForms();
       renderPendingTamSpec();
@@ -755,6 +907,52 @@ INDEX_HTML = """<!doctype html>
       setOptions('tamSessionFlowgroup', namesFor('flowgroups'), 'Select flow group');
       setOptions('tamSessionCollector', namesFor('collectors'), 'None');
       setOptions('tamSessionSampler', namesFor('samplers'), 'None');
+    }
+    function populateTamEdit(kind, name) {
+      const device = selectedTamDevice();
+      if (kind === 'collectors') {
+        const item = (device.collectors || []).find(row => row.name === name);
+        if (!item) return;
+        document.getElementById('tamCollectorName').value = item.name || '';
+        document.getElementById('tamCollectorIp').value = item.ip || '';
+        document.getElementById('tamCollectorPort').value = item.port || '';
+        document.getElementById('tamCollectorProtocol').value = item.protocol || 'UDP';
+        document.getElementById('tamCollectorVrf').value = item.vrf || '';
+        queueMessage(`Loaded collector ${name} into the form. Adjust values, then Queue Add.`);
+      } else if (kind === 'samplers') {
+        const item = (device.samplers || []).find(row => row.name === name);
+        if (!item) return;
+        document.getElementById('tamSamplerName').value = item.name || '';
+        document.getElementById('tamSamplerRate').value = item.sampling_rate || '';
+        queueMessage(`Loaded sampler ${name} into the form. Adjust values, then Queue Add.`);
+      } else if (kind === 'flowgroups') {
+        const item = (device.flowgroups || []).find(row => row.name === name);
+        if (!item) return;
+        document.getElementById('tamFgName').value = item.name || '';
+        document.getElementById('tamFgId').value = item.id || '';
+        document.getElementById('tamFgPriority').value = item.priority || 100;
+        document.getElementById('tamFgProtocol').value = item.protocol || '';
+        document.getElementById('tamFgSrcIp').value = item.src_ip || '';
+        document.getElementById('tamFgDstIp').value = item.dst_ip || '';
+        document.getElementById('tamFgSrcIpv6').value = item.src_ipv6 || '';
+        document.getElementById('tamFgDstIpv6').value = item.dst_ipv6 || '';
+        document.getElementById('tamFgSrcMac').value = item.src_mac || '';
+        document.getElementById('tamFgDstMac').value = item.dst_mac || '';
+        document.getElementById('tamFgVlan').value = item.vlan || '';
+        document.getElementById('tamFgEthertype').value = item.ethertype || '';
+        document.getElementById('tamFgSrcPort').value = item.l4_src_port || '';
+        document.getElementById('tamFgDstPort').value = item.l4_dst_port || '';
+        queueMessage(`Loaded flow group ${name} into the form. Adjust values, then Queue Add.`);
+      } else if (kind === 'sessions') {
+        const item = (device.ifa_sessions || []).find(row => row.name === name);
+        if (!item) return;
+        document.getElementById('tamSessionName').value = item.name || '';
+        document.getElementById('tamSessionFlowgroup').value = item.flowgroup || '';
+        document.getElementById('tamSessionNodeType').value = item.node_type || 'INGRESS';
+        document.getElementById('tamSessionCollector').value = item.collector || '';
+        document.getElementById('tamSessionSampler').value = item.sampler || '';
+        queueMessage(`Loaded IFA session ${name} into the form. Adjust values, then Queue Add.`);
+      }
     }
     function renderPendingTamSpec() {
       const text = state.tamTasks.length
@@ -898,13 +1096,46 @@ INDEX_HTML = """<!doctype html>
         document.getElementById('tamPlan').textContent = `Apply finished: ${result.summary?.requests || 0} request(s), ${result.summary?.errors || 0} error(s). TAM state refreshed.`;
       }
     }
+    function clearSuccessfulTamTasks() {
+      state.tamTasks.filter(task => task.status === 'ok').forEach(task => removeTaskFromSpec(task.description));
+      state.tamTasks = state.tamTasks.filter(task => task.status !== 'ok');
+      if (!state.tamTasks.length) {
+        state.tamSpec = emptyTamSpec();
+      }
+      renderPendingTamSpec();
+      document.getElementById('tamPlan').textContent = state.tamTasks.length ? 'Successful tasks cleared; failed or pending tasks remain.' : '{}';
+    }
+    function removeTaskFromSpec(description) {
+      const removeNamed = (list, name) => {
+        const index = list.findIndex(item => item.name === name);
+        if (index >= 0) list.splice(index, 1);
+      };
+      const deleteMatch = description.match(/^delete (IFA session|collector|sampler|flowgroup) (.+)$/);
+      if (deleteMatch) {
+        const map = {'IFA session': 'sessions', collector: 'collectors', sampler: 'samplers', flowgroup: 'flowgroups'};
+        const key = map[deleteMatch[1]];
+        state.tamSpec.delete[key] = (state.tamSpec.delete[key] || []).filter(name => name !== deleteMatch[2]);
+        return;
+      }
+      const setMatch = description.match(/^set (collector|sampler|flowgroup|IFA session) (.+)$/);
+      if (setMatch) {
+        const map = {collector: 'collectors', sampler: 'samplers', flowgroup: 'flowgroups', 'IFA session': 'sessions'};
+        removeNamed(state.tamSpec[map[setMatch[1]]] || [], setMatch[2]);
+        return;
+      }
+      if (description === 'set switch-id') delete state.tamSpec.switch.switch_id;
+      if (description === 'set enterprise-id') delete state.tamSpec.switch.enterprise_id;
+      if (description.startsWith('set IFA ')) delete state.tamSpec.ifa_status;
+      if (description === 'delete switch-id') delete state.tamSpec.delete.switch_id;
+      if (description === 'delete enterprise-id') delete state.tamSpec.delete.enterprise_id;
+    }
     async function loadFlow(flowKey) {
       const data = await api('/api/flow-detail?flow_key=' + encodeURIComponent(flowKey) + '&limit=3');
       const flow = data.flow;
       const records = data.sample_records.map(r => `<div>
         <p><span class="pill">seq ${esc(r.sequence_number)}</span> <code>${esc(r.resolved_traffic_path)}</code></p>
         <div class="hopline">${r.hops.map((h, i) => `<div class="hop">
-          <strong>${esc(h.device_name || h.device_id)}</strong><br>
+          <strong>${esc(hopDeviceDisplay(h))}</strong><br>
           ${h.model ? `${esc(h.model)}<br>` : ''}
           ingress ${esc(h.ingress_interface || h.ingress_logical_port)} -> egress ${esc(h.egress_interface || h.egress_logical_port)}<br>
           ttl ${esc(h.ttl)}
@@ -926,6 +1157,18 @@ INDEX_HTML = """<!doctype html>
       renderTopology();
     });
     document.getElementById('topoAdd').addEventListener('click', addTopologyTarget);
+    document.getElementById('refreshData').addEventListener('click', () => loadAll().catch(err => {
+      document.getElementById('pcapStatus').textContent = err.message || String(err);
+    }));
+    document.getElementById('pcapImport').addEventListener('click', () => importPcap().catch(err => {
+      document.getElementById('pcapStatus').textContent = err.message || String(err);
+    }));
+    document.getElementById('collectorStart').addEventListener('click', () => startCollector().catch(err => {
+      document.getElementById('collectorStatus').textContent = err.message || String(err);
+    }));
+    document.getElementById('collectorStop').addEventListener('click', () => stopCollector().catch(err => {
+      document.getElementById('collectorStatus').textContent = err.message || String(err);
+    }));
     document.getElementById('topoClear').addEventListener('click', () => {
       document.getElementById('topoTargets').value = '';
       document.getElementById('topoUser').value = '';
@@ -961,12 +1204,14 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('tamPlan').textContent = '{}';
       renderPendingTamSpec();
     });
+    document.getElementById('tamClearSuccess').addEventListener('click', clearSuccessfulTamTasks);
     document.getElementById('tamPreview').addEventListener('click', () => previewTam().catch(err => {
       document.getElementById('tamPlan').textContent = err.message || String(err);
     }));
     document.getElementById('tamApply').addEventListener('click', () => applyTam().catch(err => {
       document.getElementById('tamPlan').textContent = err.message || String(err);
     }));
+    setInterval(() => refreshCollectorStatus().catch(() => {}), 5000);
     loadAll().catch(err => { document.body.innerHTML = '<pre>' + esc(err.stack || err) + '</pre>'; });
   </script>
 </body>
@@ -976,6 +1221,9 @@ INDEX_HTML = """<!doctype html>
 
 def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None) -> None:
     topology_path = topology_path or Path("topology/topology.json")
+    registry = SchemaRegistry.load_default()
+    inventory = Inventory()
+    collector = UdpIngestCollector(db_path, registry, inventory)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
@@ -996,6 +1244,8 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     self._send_json({"errors": _query(db_path).errors(limit)})
                 elif parsed.path == "/api/topology":
                     self._send_json(load_topology(topology_path))
+                elif parsed.path == "/api/collector/status":
+                    self._send_json(collector.status())
                 elif parsed.path == "/api/flow-detail":
                     params = parse_qs(parsed.query)
                     flow_key = unquote(params.get("flow_key", [""])[0])
@@ -1059,6 +1309,23 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/tam/apply":
                     body = self._read_json()
                     self._send_json(apply_tam_plan(_web_device_specs(body), _spec(body)))
+                elif parsed.path == "/api/pcap/ingest":
+                    body = self._read_json()
+                    path = Path(str(body.get("path", ""))).expanduser()
+                    if not path.exists():
+                        self.send_error(HTTPStatus.BAD_REQUEST, f"pcap not found: {path}")
+                        return
+                    self._send_json(ingest_pcap(path, db_path, registry, inventory).as_dict())
+                elif parsed.path == "/api/collector/start":
+                    body = self._read_json()
+                    listen_host = str(body.get("host", "0.0.0.0") or "0.0.0.0")
+                    listen_port = int(body.get("port", 0))
+                    if listen_port <= 0:
+                        self.send_error(HTTPStatus.BAD_REQUEST, "port is required")
+                        return
+                    self._send_json(collector.start(listen_host, listen_port))
+                elif parsed.path == "/api/collector/stop":
+                    self._send_json(collector.stop())
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             except ValueError as exc:
