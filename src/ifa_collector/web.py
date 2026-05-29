@@ -181,6 +181,7 @@ INDEX_HTML = """<!doctype html>
       padding: 6px 7px;
       font-size: 13px;
     }
+    .device-list input[type="checkbox"] { width: auto; }
     .mini {
       border: 1px solid var(--line);
       background: white;
@@ -268,12 +269,9 @@ INDEX_HTML = """<!doctype html>
       <div class="panel">
         <h2>TAM / IFA State</h2>
         <div style="padding: 12px 14px;">
-          <label for="tamDevices">Devices</label>
-          <textarea id="tamDevices" autocomplete="off" spellcheck="false" placeholder="10.101.110.1,admin,admin&#10;10.101.110.2,admin,admin"></textarea>
-          <div class="status" style="padding: 6px 0 0;">Used by Read TAM and Apply. Credentials are not persisted.</div>
+          <div class="status" style="padding: 0 0 8px;">Uses the shared device list from Topology. Select the devices to read or configure.</div>
+          <div id="tamSharedDeviceRows" class="device-list"></div>
           <button id="tamRead" class="primary" style="margin-top: 8px;">Read TAM</button>
-          <button id="tamClear" class="secondary" style="margin-top: 8px;">Clear</button>
-          <div id="tamDeviceRows" class="device-list"></div>
         </div>
         <div id="tamStatus" class="status"></div>
       </div>
@@ -300,7 +298,7 @@ INDEX_HTML = """<!doctype html>
     </section>
   </main>
   <script>
-    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null, topologyTargets: [] };
+    const state = { exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null, devices: [] };
 
     async function api(path, options) {
       const res = await fetch(path, options);
@@ -415,10 +413,10 @@ INDEX_HTML = """<!doctype html>
       const status = document.getElementById('topologyStatus');
       status.textContent = 'Scanning topology...';
       const body = {
-        credential_targets: state.topologyTargets
+        credential_targets: state.devices.map(d => ({targets: d.host, username: d.username, password: d.password}))
       };
       if (!body.credential_targets.length) {
-        status.textContent = 'Add at least one credential target before scanning.';
+        status.textContent = 'Add at least one device before scanning.';
         return;
       }
       state.topology = await api('/api/topology/scan', {
@@ -426,6 +424,8 @@ INDEX_HTML = """<!doctype html>
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)
       });
+      updateDeviceHostnames();
+      renderSharedDeviceRows();
       renderTopology();
     }
     function parseDeviceSpecs(text) {
@@ -452,12 +452,20 @@ INDEX_HTML = """<!doctype html>
         return;
       }
       const targets = splitTargets(target);
-      targets.forEach(item => state.topologyTargets.push({targets: item, username, password}));
-      renderTopologyTargetRows();
+      if (targets.some(item => item.includes('/') || item.includes('-'))) {
+        document.getElementById('topologyStatus').textContent = 'Add supports IPs only. Enter multiple IPs separated by comma or space.';
+        return;
+      }
+      targets.forEach(item => {
+        if (!state.devices.some(device => device.host === item)) {
+          state.devices.push({host: item, username, password, hostname: '', selected: true});
+        }
+      });
+      renderSharedDeviceRows();
       document.getElementById('topoTargets').value = '';
       document.getElementById('topoUser').value = '';
       document.getElementById('topoPass').value = '';
-      document.getElementById('topologyStatus').textContent = `${state.topologyTargets.length} targets ready.`;
+      document.getElementById('topologyStatus').textContent = `${state.devices.length} devices ready.`;
     }
     function writeDeviceLines(textareaId, rows) {
       document.getElementById(textareaId).value = rows.map(row => `${row.host || ''},${row.username || ''},${row.password || ''}`).join('\\n');
@@ -492,30 +500,54 @@ INDEX_HTML = """<!doctype html>
         });
       });
     }
-    function renderTopologyTargetRows() {
-      const container = document.getElementById('topoDeviceRows');
-      if (!state.topologyTargets.length) {
+    function renderSharedDeviceRows() {
+      renderSharedDeviceRowsIn('topoDeviceRows', true);
+      renderSharedDeviceRowsIn('tamSharedDeviceRows', false);
+    }
+    function renderSharedDeviceRowsIn(containerId, allowDelete) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      if (!state.devices.length) {
         container.innerHTML = '';
         return;
       }
-      container.innerHTML = table(['Targets', 'Username', 'Password', ''], state.topologyTargets.map((row, i) => `<tr>
-        <td><input data-topology-row="${i}" data-topology-field="targets" value="${esc(row.targets)}"></td>
-        <td><input data-topology-row="${i}" data-topology-field="username" value="${esc(row.username)}"></td>
-        <td><input data-topology-row="${i}" data-topology-field="password" type="password" value="${esc(row.password)}"></td>
-        <td><button class="mini" data-topology-delete="${i}">Delete</button></td>
+      container.innerHTML = table(['Use', 'IP', 'Hostname', 'Username', 'Password', ''], state.devices.map((row, i) => `<tr>
+        <td><input data-shared-row="${i}" data-shared-field="selected" type="checkbox" ${row.selected ? 'checked' : ''}></td>
+        <td><input data-shared-row="${i}" data-shared-field="host" value="${esc(row.host)}"></td>
+        <td>${esc(row.hostname || '-')}</td>
+        <td><input data-shared-row="${i}" data-shared-field="username" value="${esc(row.username)}"></td>
+        <td><input data-shared-row="${i}" data-shared-field="password" type="password" value="${esc(row.password)}"></td>
+        <td>${allowDelete ? `<button class="mini" data-shared-delete="${i}">Delete</button>` : ''}</td>
       </tr>`));
-      container.querySelectorAll('input[data-topology-row]').forEach(input => {
+      container.querySelectorAll('input[data-shared-row]').forEach(input => {
         input.addEventListener('input', () => {
-          state.topologyTargets[Number(input.dataset.topologyRow)][input.dataset.topologyField] = input.value;
+          const row = state.devices[Number(input.dataset.sharedRow)];
+          if (input.dataset.sharedField === 'selected') {
+            row.selected = input.checked;
+            renderSharedDeviceRows();
+          } else {
+            row[input.dataset.sharedField] = input.value;
+            if (input.dataset.sharedField === 'host') row.hostname = '';
+          }
         });
       });
-      container.querySelectorAll('button[data-topology-delete]').forEach(button => {
+      container.querySelectorAll('button[data-shared-delete]').forEach(button => {
         button.addEventListener('click', () => {
-          state.topologyTargets.splice(Number(button.dataset.topologyDelete), 1);
-          renderTopologyTargetRows();
-          document.getElementById('topologyStatus').textContent = `${state.topologyTargets.length} targets ready.`;
+          state.devices.splice(Number(button.dataset.sharedDelete), 1);
+          renderSharedDeviceRows();
+          document.getElementById('topologyStatus').textContent = `${state.devices.length} devices ready.`;
         });
       });
+    }
+    function selectedDeviceSpecs() {
+      return state.devices.filter(d => d.selected).map(d => ({host: d.host, username: d.username, password: d.password}))
+        .filter(d => d.host && d.username && d.password);
+    }
+    function updateDeviceHostnames() {
+      const nodes = state.topology?.graph?.nodes || [];
+      const byIp = {};
+      nodes.forEach(node => { if (node.ip) byIp[node.ip] = node.id; });
+      state.devices.forEach(device => { device.hostname = byIp[device.host] || device.hostname || ''; });
     }
     function flowgroupMatch(f) {
       const parts = [];
@@ -557,9 +589,9 @@ INDEX_HTML = """<!doctype html>
     async function readTam() {
       const status = document.getElementById('tamStatus');
       status.textContent = 'Reading TAM state...';
-      const devices = parseDeviceSpecs(document.getElementById('tamDevices').value);
+      const devices = selectedDeviceSpecs();
       if (!devices.length) {
-        status.textContent = 'Enter at least one device as host,username,password.';
+        status.textContent = 'Select at least one device with IP, username, and password.';
         return;
       }
       state.tam = await api('/api/tam/read', {
@@ -595,9 +627,9 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('tamPlan').textContent = JSON.stringify(plan, null, 2);
     }
     async function applyTam() {
-      const devices = parseDeviceSpecs(document.getElementById('tamDevices').value);
+      const devices = selectedDeviceSpecs();
       if (!devices.length) {
-        document.getElementById('tamPlan').textContent = 'Enter at least one device as host,username,password.';
+        document.getElementById('tamPlan').textContent = 'Select at least one device with IP, username, and password.';
         return;
       }
       const result = await api('/api/tam/apply', {
@@ -638,8 +670,6 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('topoTargets').value = '';
       document.getElementById('topoUser').value = '';
       document.getElementById('topoPass').value = '';
-      state.topologyTargets = [];
-      renderTopologyTargetRows();
       state.topology = { graph: { nodes: [], links: [] }, summary: {}, errors: [] };
       renderTopology();
     });
@@ -649,14 +679,8 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('tamRead').addEventListener('click', () => readTam().catch(err => {
       document.getElementById('tamStatus').textContent = err.message || String(err);
     }));
-    document.getElementById('tamClear').addEventListener('click', () => {
-      document.getElementById('tamDevices').value = '';
-      renderDeviceRows('tamDevices', 'tamDeviceRows');
-    });
-    document.getElementById('tamDevices').addEventListener('input', () => renderDeviceRows('tamDevices', 'tamDeviceRows'));
     document.getElementById('tamConfigSpec').value = JSON.stringify(defaultTamSpec(), null, 2);
-    renderTopologyTargetRows();
-    renderDeviceRows('tamDevices', 'tamDeviceRows');
+    renderSharedDeviceRows();
     document.getElementById('tamPreview').addEventListener('click', () => previewTam().catch(err => {
       document.getElementById('tamPlan').textContent = err.message || String(err);
     }));
