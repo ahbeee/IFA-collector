@@ -50,3 +50,5 @@ RESTCONF TAM/IFA state read currently expects these SONiC paths:
 - `openconfig-tam:tam/flowgroups`
 - `openconfig-tam:tam/ifa-sessions`
 - `sonic-vrf:sonic-vrf/VRF/VRF_LIST`
+
+Flow group payload builders support IPv4, IPv6, source/destination MAC, L4 source/destination port, protocol, VLAN ID, and ethertype values observed from SONiC CLI logs: `arp`, `ip`, `ipv6`, `lldp`, `mpls`, `roce`, and `vlan`.

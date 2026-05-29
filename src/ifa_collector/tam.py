@@ -111,6 +111,9 @@ def _flowgroups(payload: dict[str, Any]) -> list[dict[str, Any]]:
     for item in _list(root, "flowgroup"):
         state = _state(item)
         ipv4 = _state(item.get("ipv4", {}))
+        ipv6 = _state(item.get("ipv6", {}))
+        l2 = _state(item.get("l2", {}))
+        transport = _state(item.get("transport", {}))
         stats = state.get("statistics", {})
         rows.append(
             {
@@ -119,7 +122,15 @@ def _flowgroups(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "priority": state.get("priority"),
                 "src_ip": ipv4.get("source-address"),
                 "dst_ip": ipv4.get("destination-address"),
+                "src_ipv6": ipv6.get("source-address"),
+                "dst_ipv6": ipv6.get("destination-address"),
                 "protocol": _short_enum(ipv4.get("protocol")),
+                "src_mac": l2.get("source-mac"),
+                "dst_mac": l2.get("destination-mac"),
+                "vlan": l2.get("vlan"),
+                "ethertype": _short_enum(l2.get("ethertype")),
+                "l4_src_port": transport.get("source-port"),
+                "l4_dst_port": transport.get("destination-port"),
                 "packets": _to_int(stats.get("packets")),
                 "bytes": _to_int(stats.get("bytes")),
             }
@@ -172,25 +183,59 @@ def flowgroup_payload(
     name: str,
     flowgroup_id: int,
     priority: int,
-    src_ip: str,
-    dst_ip: str,
-    protocol: str,
+    src_ip: str | None = None,
+    dst_ip: str | None = None,
+    protocol: str | None = None,
+    src_ipv6: str | None = None,
+    dst_ipv6: str | None = None,
+    src_mac: str | None = None,
+    dst_mac: str | None = None,
+    l4_src_port: int | None = None,
+    l4_dst_port: int | None = None,
+    vlan: int | None = None,
+    ethertype: str | None = None,
 ) -> dict[str, Any]:
+    flowgroup: dict[str, Any] = {
+        "name": name,
+        "config": {"name": name, "id": int(flowgroup_id), "priority": int(priority)},
+    }
+    if src_ip or dst_ip or protocol:
+        flowgroup["ipv4"] = {
+            "config": _without_none(
+                {
+                    "source-address": src_ip,
+                    "destination-address": dst_ip,
+                    "protocol": f"IP_{protocol.upper()}" if protocol else None,
+                }
+            )
+        }
+    if src_ipv6 or dst_ipv6:
+        flowgroup["ipv6"] = {
+            "config": _without_none({"source-address": src_ipv6, "destination-address": dst_ipv6})
+        }
+    if src_mac or dst_mac or vlan is not None or ethertype:
+        flowgroup["l2"] = {
+            "config": _without_none(
+                {
+                    "source-mac": src_mac.upper() if src_mac else None,
+                    "destination-mac": dst_mac.upper() if dst_mac else None,
+                    "vlan": int(vlan) if vlan is not None else None,
+                    "ethertype": _ethertype_value(ethertype) if ethertype else None,
+                }
+            )
+        }
+    if l4_src_port is not None or l4_dst_port is not None:
+        flowgroup["transport"] = {
+            "config": _without_none(
+                {
+                    "source-port": int(l4_src_port) if l4_src_port is not None else None,
+                    "destination-port": int(l4_dst_port) if l4_dst_port is not None else None,
+                }
+            )
+        }
     return {
         "openconfig-tam:flowgroups": {
-            "flowgroup": [
-                {
-                    "name": name,
-                    "config": {"name": name, "id": int(flowgroup_id), "priority": int(priority)},
-                    "ipv4": {
-                        "config": {
-                            "source-address": src_ip,
-                            "destination-address": dst_ip,
-                            "protocol": f"IP_{protocol.upper()}",
-                        }
-                    },
-                }
-            ]
+            "flowgroup": [flowgroup]
         }
     }
 
@@ -229,7 +274,7 @@ def _list(root: Any, key: str) -> list[dict[str, Any]]:
 def _short_enum(value: Any) -> str | None:
     if value is None:
         return None
-    return str(value).split(":")[-1].replace("IP_", "")
+    return str(value).split(":")[-1].replace("IP_", "").replace("ETHERTYPE_", "")
 
 
 def _to_int(value: Any) -> int:
@@ -237,3 +282,22 @@ def _to_int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _without_none(values: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def _ethertype_value(value: str) -> str:
+    normalized = value.strip().upper()
+    aliases = {
+        "ARP": "ETHERTYPE_ARP",
+        "IP": "ETHERTYPE_IPV4",
+        "IPV4": "ETHERTYPE_IPV4",
+        "IPV6": "ETHERTYPE_IPV6",
+        "LLDP": "ETHERTYPE_LLDP",
+        "MPLS": "ETHERTYPE_MPLS",
+        "ROCE": "ETHERTYPE_ROCE",
+        "VLAN": "ETHERTYPE_VLAN",
+    }
+    return aliases.get(normalized, normalized)

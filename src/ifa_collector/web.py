@@ -381,6 +381,17 @@ INDEX_HTML = """<!doctype html>
         return {host: parts[0]?.trim(), username: parts[1]?.trim(), password: parts.slice(2).join(',').trim()};
       }).filter(item => item.host && item.username && item.password);
     }
+    function flowgroupMatch(f) {
+      const parts = [];
+      if (f.src_ip || f.dst_ip) parts.push(`${f.src_ip || '*'} -> ${f.dst_ip || '*'}`);
+      if (f.src_ipv6 || f.dst_ipv6) parts.push(`${f.src_ipv6 || '*'} -> ${f.dst_ipv6 || '*'}`);
+      if (f.protocol) parts.push(`proto=${f.protocol}`);
+      if (f.src_mac || f.dst_mac) parts.push(`mac=${f.src_mac || '*'} -> ${f.dst_mac || '*'}`);
+      if (f.l4_src_port || f.l4_dst_port) parts.push(`l4=${f.l4_src_port || '*'} -> ${f.l4_dst_port || '*'}`);
+      if (f.vlan) parts.push(`vlan=${f.vlan}`);
+      if (f.ethertype) parts.push(`ethertype=${f.ethertype}`);
+      return parts.join(', ');
+    }
     function renderTam() {
       const tam = state.tam || { devices: [], errors: [] };
       document.getElementById('tamStatus').textContent = tam.summary
@@ -402,8 +413,8 @@ INDEX_HTML = """<!doctype html>
         tam.devices.flatMap(d => (d.collectors || []).map(c => `<tr><td>${esc(d.host)}</td><td>${esc(c.name)}</td><td>${esc(c.ip)}</td><td>${esc(c.port)}</td><td>${esc(c.protocol)}</td><td>${esc(c.vrf || '-')}</td></tr>`)));
       document.getElementById('tamSamplers').innerHTML = table(['Host', 'Name', 'Sampling Rate'],
         tam.devices.flatMap(d => (d.samplers || []).map(s => `<tr><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.sampling_rate)}</td></tr>`)));
-      document.getElementById('tamFlowgroups').innerHTML = table(['Host', 'Name', 'ID', 'Flow', 'Proto', 'Packets', 'Bytes'],
-        tam.devices.flatMap(d => (d.flowgroups || []).map(f => `<tr><td>${esc(d.host)}</td><td>${esc(f.name)}</td><td>${esc(f.id)}</td><td><code>${esc(f.src_ip)} -> ${esc(f.dst_ip)}</code></td><td>${esc(f.protocol)}</td><td>${esc(f.packets)}</td><td>${esc(f.bytes)}</td></tr>`)));
+      document.getElementById('tamFlowgroups').innerHTML = table(['Host', 'Name', 'ID', 'Match', 'Packets', 'Bytes'],
+        tam.devices.flatMap(d => (d.flowgroups || []).map(f => `<tr><td>${esc(d.host)}</td><td>${esc(f.name)}</td><td>${esc(f.id)}</td><td><code>${esc(flowgroupMatch(f))}</code></td><td>${esc(f.packets)}</td><td>${esc(f.bytes)}</td></tr>`)));
       document.getElementById('tamSessions').innerHTML = table(['Host', 'Name', 'Flow Group', 'Node Type', 'Collector', 'Sampler'],
         tam.devices.flatMap(d => (d.ifa_sessions || []).map(s => `<tr><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.flowgroup)}</td><td>${esc(s.node_type)}</td><td>${esc(s.collector || '-')}</td><td>${esc(s.sampler || '-')}</td></tr>`)));
     }
