@@ -155,6 +155,39 @@ def scan_topology_devices(
     return output
 
 
+def scan_topology_target_specs(
+    target_specs: list[dict[str, Any]],
+    output_path: Path,
+    rest_port: int = 443,
+    path_prefix: str = "/restconf/data",
+    verify_tls: bool = False,
+    timeout: float = 10,
+    ping_first: bool = True,
+    ping_timeout_ms: int = 500,
+    paths: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    devices = []
+    target_count = 0
+    for item in target_specs:
+        targets = parse_targets(str(item.get("targets") or item.get("host") or ""))
+        target_count += len(targets)
+        scan_targets = _live_hosts(targets, ping_timeout_ms) if ping_first else targets
+        auth = RestconfAuth(
+            username=str(item.get("username", "")),
+            password=str(item.get("password", "")),
+            port=int(item.get("rest_port", rest_port)),
+            path_prefix=str(item.get("path_prefix", path_prefix)),
+            verify_tls=bool(item.get("verify_tls", verify_tls)),
+            timeout=float(item.get("timeout", timeout)),
+        )
+        devices.extend(RestconfDevice(host=host, auth=auth) for host in scan_targets)
+    output = scan_topology_devices(devices, output_path, paths=paths)
+    output["summary"]["targets"] = target_count
+    output["summary"]["scanned"] = len(devices)
+    _write_topology(output_path, output)
+    return output
+
+
 def _write_topology(output_path: Path, output: dict[str, Any]) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(output, indent=2, sort_keys=True), encoding="utf-8")

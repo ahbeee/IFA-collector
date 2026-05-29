@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from .query import QueryStore
 from .tam import apply_tam_plan, preview_tam_plan, read_tam_devices
-from .topology import RestconfAuth, RestconfDevice, load_topology, scan_topology, scan_topology_devices
+from .topology import RestconfAuth, RestconfDevice, load_topology, scan_topology, scan_topology_devices, scan_topology_target_specs
 
 
 INDEX_HTML = """<!doctype html>
@@ -107,7 +107,7 @@ INDEX_HTML = """<!doctype html>
     .arrow { color: var(--muted); }
     .toolbar {
       display: grid;
-      grid-template-columns: minmax(220px, 1fr) 140px 140px 92px 92px;
+      grid-template-columns: minmax(220px, 1fr) 140px 140px 92px;
       gap: 8px;
       padding: 12px 14px;
       border-bottom: 1px solid var(--line);
@@ -152,6 +152,12 @@ INDEX_HTML = """<!doctype html>
     .topology {
       min-height: 480px;
       padding: 12px 14px 16px;
+    }
+    .topology-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 12px 14px 0;
     }
     .topology svg {
       width: 100%;
@@ -242,17 +248,20 @@ INDEX_HTML = """<!doctype html>
           <div><label for="topoTargets">Targets</label><input id="topoTargets" placeholder="192.168.100.11, 192.168.100.12 or /24"></div>
           <div><label for="topoUser">Username</label><input id="topoUser" autocomplete="username"></div>
           <div><label for="topoPass">Password</label><input id="topoPass" type="password" autocomplete="current-password"></div>
-          <button id="topoScan" class="primary">Scan</button>
-          <button id="topoReload" class="secondary">Reload</button>
+          <button id="topoAdd" class="primary">Add</button>
         </div>
         <div style="padding: 0 14px 12px;">
-          <label for="topoDevices">Per-device credentials</label>
+          <label for="topoDevices">Credential targets</label>
           <textarea id="topoDevices" autocomplete="off" spellcheck="false" placeholder="10.101.110.1,admin,admin&#10;10.101.110.2,admin,admin"></textarea>
           <div class="status" style="padding: 6px 0 0;">One device per line. Used for this scan only; not saved by the app.</div>
           <button id="topoClear" class="secondary" style="margin-top: 8px;">Clear</button>
           <div id="topoDeviceRows" class="device-list"></div>
         </div>
         <div id="topologyStatus" class="status"></div>
+        <div class="topology-actions">
+          <button id="topoScan" class="primary">Scan</button>
+          <button id="topoReload" class="secondary">Reload</button>
+        </div>
         <div id="topologyGraph" class="topology"></div>
       </div>
       <div class="panel"><h2>LLDP Links</h2><div id="topologyLinks"></div></div>
@@ -409,11 +418,12 @@ INDEX_HTML = """<!doctype html>
       const status = document.getElementById('topologyStatus');
       status.textContent = 'Scanning topology...';
       const body = {
-        targets: document.getElementById('topoTargets').value,
-        username: document.getElementById('topoUser').value,
-        password: document.getElementById('topoPass').value,
-        devices: parseDeviceSpecs(document.getElementById('topoDevices').value)
+        credential_targets: credentialTargetSpecs('topoDevices')
       };
+      if (!body.credential_targets.length) {
+        status.textContent = 'Add at least one credential target before scanning.';
+        return;
+      }
       state.topology = await api('/api/topology/scan', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -427,11 +437,32 @@ INDEX_HTML = """<!doctype html>
         return {host: parts[0]?.trim(), username: parts[1]?.trim(), password: parts.slice(2).join(',').trim()};
       }).filter(item => item.host && item.username && item.password);
     }
+    function credentialTargetSpecs(textareaId) {
+      return deviceLines(textareaId).map(item => ({targets: item.host, username: item.username, password: item.password}))
+        .filter(item => item.targets && item.username && item.password);
+    }
     function deviceLines(textareaId) {
       return String(document.getElementById(textareaId).value || '').split(/\\r?\\n/).map(line => {
         const parts = line.split(',');
         return {host: (parts[0] || '').trim(), username: (parts[1] || '').trim(), password: parts.slice(2).join(',').trim()};
       }).filter(item => item.host || item.username || item.password);
+    }
+    function addTopologyTarget() {
+      const target = document.getElementById('topoTargets').value.trim();
+      const username = document.getElementById('topoUser').value.trim();
+      const password = document.getElementById('topoPass').value;
+      if (!target || !username || !password) {
+        document.getElementById('topologyStatus').textContent = 'Enter targets, username, and password before Add.';
+        return;
+      }
+      const rows = deviceLines('topoDevices');
+      rows.push({host: target, username, password});
+      writeDeviceLines('topoDevices', rows);
+      renderDeviceRows('topoDevices', 'topoDeviceRows');
+      document.getElementById('topoTargets').value = '';
+      document.getElementById('topoUser').value = '';
+      document.getElementById('topoPass').value = '';
+      document.getElementById('topologyStatus').textContent = `${rows.length} credential targets ready.`;
     }
     function writeDeviceLines(textareaId, rows) {
       document.getElementById(textareaId).value = rows.map(row => `${row.host || ''},${row.username || ''},${row.password || ''}`).join('\\n');
@@ -443,7 +474,7 @@ INDEX_HTML = """<!doctype html>
         container.innerHTML = '';
         return;
       }
-      container.innerHTML = table(['Host', 'Username', 'Password', ''], rows.map((row, i) => `<tr>
+      container.innerHTML = table(['Targets', 'Username', 'Password', ''], rows.map((row, i) => `<tr>
         <td><input data-device-row="${i}" data-device-field="host" value="${esc(row.host)}"></td>
         <td><input data-device-row="${i}" data-device-field="username" value="${esc(row.username)}"></td>
         <td><input data-device-row="${i}" data-device-field="password" type="password" value="${esc(row.password)}"></td>
@@ -582,6 +613,7 @@ INDEX_HTML = """<!doctype html>
       state.topology = await api('/api/topology');
       renderTopology();
     });
+    document.getElementById('topoAdd').addEventListener('click', addTopologyTarget);
     document.getElementById('topoClear').addEventListener('click', () => {
       document.getElementById('topoTargets').value = '';
       document.getElementById('topoUser').value = '';
@@ -658,7 +690,20 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
             try:
                 if parsed.path == "/api/topology/scan":
                     body = self._read_json()
-                    if body.get("devices"):
+                    if body.get("credential_targets"):
+                        self._send_json(
+                            scan_topology_target_specs(
+                                body["credential_targets"],
+                                topology_path,
+                                rest_port=int(body.get("rest_port", body.get("port", 443))),
+                                path_prefix=str(body.get("path_prefix", "/restconf/data")),
+                                verify_tls=bool(body.get("verify_tls", False)),
+                                timeout=float(body.get("timeout", 10)),
+                                ping_first=bool(body.get("ping_first", True)),
+                                ping_timeout_ms=int(body.get("ping_timeout_ms", 500)),
+                            )
+                        )
+                    elif body.get("devices"):
                         self._send_json(scan_topology_devices(_web_device_specs(body), topology_path))
                     else:
                         auth = RestconfAuth(
