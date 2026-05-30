@@ -82,3 +82,46 @@ def test_sqlite_store_re_resolves_existing_hops(tmp_path: Path) -> None:
     assert result == {"records": 1, "hops": 3}
     assert after_path.startswith("Border1(Ethernet0->Ethernet48)")
     assert after_iface == "Ethernet0"
+
+
+def test_sqlite_store_deletes_import_run_and_rebuilds_counts(tmp_path: Path) -> None:
+    packet = ParsedIfaPacket(
+        flow_key=FlowKey("1.1.1.1", "4.4.4.4", 17, 12345, 5000),
+        ifa_header=IfaHeader(2, 15, 17, 0, 255),
+        metadata_header=IfaMetadataHeader(255, 255, 30, 24),
+        checksum_header=None,
+        fragment_header=None,
+        hops=[HopMetadata(b"", {"device_id": 1001, "ingress_logical_port": 3, "egress_logical_port": 79})],
+        raw_metadata_stack=b"abc",
+        post_metadata_payload=b"def",
+        raw_packet=b"abcdef",
+        wrapper={
+            "sequence_number": 10,
+            "observation_domain_id": 305419896,
+            "set_id": 257,
+            "transport": {"src_ip": "10.0.0.1", "src_port": 9070, "dst_ip": "192.0.2.1", "dst_port": 9090},
+        },
+    )
+    db_path = tmp_path / "ifa.sqlite"
+    store = SqliteStore(db_path)
+    import_one = store.record_import_run(100, "one.pcap", 0, 0)
+    import_two = store.record_import_run(200, "two.pcap", 0, 0)
+    store.insert_packet(1000, packet, Inventory(), import_id=import_one)
+    store.insert_error(1001, "bad one", import_id=import_one)
+    store.insert_packet(2000, packet, Inventory(), import_id=import_two)
+    store.update_import_run(import_one, 1, 1)
+    store.update_import_run(import_two, 1, 0)
+    store.commit()
+
+    result = store.delete_import_run(import_one)
+    store.close()
+
+    conn = sqlite3.connect(db_path)
+    assert result == {"imports": 1, "records": 1, "hops": 1, "errors": 1}
+    assert conn.execute("SELECT COUNT(*) FROM import_runs WHERE id = ?", (import_one,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM ifa_records WHERE import_id = ?", (import_one,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM parse_errors WHERE import_id = ?", (import_one,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM ifa_records WHERE import_id = ?", (import_two,)).fetchone()[0] == 1
+    assert conn.execute("SELECT records FROM flows").fetchone()[0] == 1
+    assert conn.execute("SELECT records FROM exporters").fetchone()[0] == 1
+    conn.close()

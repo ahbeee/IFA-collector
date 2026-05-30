@@ -223,6 +223,45 @@ class SqliteStore:
         )
         self.conn.commit()
 
+    def delete_import_run(self, import_id: int) -> dict[str, int]:
+        records = int(
+            self.conn.execute(
+                "SELECT COUNT(*) FROM ifa_records WHERE import_id = ?",
+                (import_id,),
+            ).fetchone()[0]
+            or 0
+        )
+        hops = int(
+            self.conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM hops AS h
+                JOIN ifa_records AS r ON r.id = h.record_id
+                WHERE r.import_id = ?
+                """,
+                (import_id,),
+            ).fetchone()[0]
+            or 0
+        )
+        errors = int(
+            self.conn.execute(
+                "SELECT COUNT(*) FROM parse_errors WHERE import_id = ?",
+                (import_id,),
+            ).fetchone()[0]
+            or 0
+        )
+
+        self.conn.execute(
+            "DELETE FROM hops WHERE record_id IN (SELECT id FROM ifa_records WHERE import_id = ?)",
+            (import_id,),
+        )
+        self.conn.execute("DELETE FROM ifa_records WHERE import_id = ?", (import_id,))
+        self.conn.execute("DELETE FROM parse_errors WHERE import_id = ?", (import_id,))
+        deleted_imports = self.conn.execute("DELETE FROM import_runs WHERE id = ?", (import_id,)).rowcount
+        self._rebuild_aggregate_counts()
+        self.conn.commit()
+        return {"imports": int(deleted_imports or 0), "records": records, "hops": hops, "errors": errors}
+
     def re_resolve_inventory(self, inventory: Inventory) -> dict[str, int]:
         hop_rows = self.conn.execute(
             """
@@ -279,6 +318,82 @@ class SqliteStore:
 
         self.conn.commit()
         return {"records": updated_records, "hops": updated_hops}
+
+    def _rebuild_aggregate_counts(self) -> None:
+        self.conn.execute(
+            """
+            UPDATE flows
+            SET
+                records = COALESCE((SELECT COUNT(*) FROM ifa_records WHERE flow_key = flows.flow_key), 0),
+                first_seen_ns = (SELECT MIN(timestamp_ns) FROM ifa_records WHERE flow_key = flows.flow_key),
+                last_seen_ns = (SELECT MAX(timestamp_ns) FROM ifa_records WHERE flow_key = flows.flow_key)
+            """
+        )
+        self.conn.execute("DELETE FROM flows WHERE records = 0")
+
+        exporter_stats = {}
+        for row in self.conn.execute(
+            """
+            SELECT exporter_key, sequence_number, timestamp_ns
+            FROM ifa_records
+            WHERE exporter_key IS NOT NULL
+            ORDER BY exporter_key, sequence_number
+            """
+        ):
+            key = row[0]
+            stats = exporter_stats.setdefault(
+                key,
+                {
+                    "records": 0,
+                    "first_sequence": None,
+                    "last_sequence": None,
+                    "gaps": 0,
+                    "duplicate_or_reordered": 0,
+                    "last_seen_ns": None,
+                },
+            )
+            sequence = row[1]
+            stats["records"] += 1
+            if stats["last_seen_ns"] is None or (row[2] is not None and row[2] > stats["last_seen_ns"]):
+                stats["last_seen_ns"] = row[2]
+            if sequence is None:
+                continue
+            if stats["first_sequence"] is None:
+                stats["first_sequence"] = sequence
+            previous = stats["last_sequence"]
+            if previous is not None:
+                if sequence > previous + 1:
+                    stats["gaps"] += sequence - previous - 1
+                elif sequence <= previous:
+                    stats["duplicate_or_reordered"] += 1
+            stats["last_sequence"] = sequence
+
+        for key, stats in exporter_stats.items():
+            self.conn.execute(
+                """
+                UPDATE exporters
+                SET first_sequence = ?, last_sequence = ?, records = ?, gaps = ?,
+                    duplicate_or_reordered = ?, last_seen_ns = ?
+                WHERE exporter_key = ?
+                """,
+                (
+                    stats["first_sequence"],
+                    stats["last_sequence"],
+                    stats["records"],
+                    stats["gaps"],
+                    stats["duplicate_or_reordered"],
+                    stats["last_seen_ns"],
+                    key,
+                ),
+            )
+        self.conn.execute(
+            """
+            DELETE FROM exporters
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ifa_records WHERE ifa_records.exporter_key = exporters.exporter_key
+            )
+            """
+        )
 
     def _upsert_exporter(
         self,

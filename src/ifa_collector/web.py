@@ -649,9 +649,10 @@ INDEX_HTML = """<!doctype html>
         <td><code>${esc(item.source || '-')}</code></td>
         <td>${esc(item.parsed_ifa_records || 0)}</td>
         <td class="${item.parse_errors ? 'bad' : ''}">${esc(item.parse_errors || 0)}</td>
+        <td><button class="secondary" onclick="deleteImport(event, ${esc(item.id)})">Delete</button></td>
       </tr>`);
       const label = state.selectedImportId ? `Filtering by import #${state.selectedImportId}` : 'Showing all records';
-      document.getElementById('importsTable').innerHTML = `<div class="status">${esc(label)} ${state.selectedImportId ? '<button class="secondary" onclick="clearImportFilter()">Clear Import Filter</button>' : ''}</div>` + table(['Import', 'Imported At', 'Source', 'Records', 'Errors'], rows);
+      document.getElementById('importsTable').innerHTML = `<div class="status">${esc(label)} ${state.selectedImportId ? '<button class="secondary" onclick="clearImportFilter()">Clear Import Filter</button>' : ''}</div>` + table(['Import', 'Imported At', 'Source', 'Records', 'Errors', 'Action'], rows);
     }
     async function selectImport(importId) {
       state.selectedImportId = Number(importId);
@@ -661,6 +662,22 @@ INDEX_HTML = """<!doctype html>
     }
     async function clearImportFilter() {
       state.selectedImportId = null;
+      await loadAll();
+    }
+    async function deleteImport(event, importId) {
+      event.stopPropagation();
+      if (!confirm(`Delete import #${importId} and all records/errors from that import?`)) return;
+      const result = await api('/api/imports/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({import_id: Number(importId)})
+      });
+      if (state.selectedImportId === Number(importId)) {
+        state.selectedImportId = null;
+        state.selectedPath = null;
+        state.selectedPathDetail = null;
+      }
+      document.getElementById('pcapStatus').textContent = `Deleted import #${importId}: ${result.records || 0} record(s), ${result.hops || 0} hop(s), ${result.errors || 0} error(s).`;
       await loadAll();
     }
     function formatRate(value) {
@@ -1588,6 +1605,17 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     store = SqliteStore(db_path)
                     try:
                         self._send_json(store.re_resolve_inventory(inventory))
+                    finally:
+                        store.close()
+                elif parsed.path == "/api/imports/delete":
+                    body = self._read_json()
+                    import_id = int(body.get("import_id", 0))
+                    if import_id <= 0:
+                        self.send_error(HTTPStatus.BAD_REQUEST, "import_id is required")
+                        return
+                    store = SqliteStore(db_path)
+                    try:
+                        self._send_json(store.delete_import_run(import_id))
                     finally:
                         store.close()
                 else:
