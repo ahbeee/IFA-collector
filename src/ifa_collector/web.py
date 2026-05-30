@@ -442,6 +442,9 @@ INDEX_HTML = """<!doctype html>
     function esc(v) {
       return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
+    function jsArg(v) {
+      return JSON.stringify(String(v ?? '')).replace(/"/g, '&quot;');
+    }
     function table(headers, rows) {
       return `<table><thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
     }
@@ -555,7 +558,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('exportersTable').innerHTML = table(['Exporter', 'Records', 'Gaps', 'Dup/Reorder', 'Sequence'], rows);
     }
     function renderFlows() {
-      const rows = state.flows.map(f => `<tr class="clickable" onclick="loadFlow(${JSON.stringify(f.flow_key).replace(/"/g, '&quot;')})">
+      const rows = state.flows.map(f => `<tr class="clickable" onclick="loadFlow(${jsArg(f.flow_key)})">
         <td><code>${esc(f.src_ip)}:${esc(f.src_port)} -> ${esc(f.dst_ip)}:${esc(f.dst_port)}</code></td>
         <td>${esc(protocolLabel(f.protocol))}</td>
         <td>${esc(f.records)}</td>
@@ -567,7 +570,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('flowsTable').innerHTML = table(['Flow', 'Proto', 'Records', 'Paths', 'Hops', 'Last Seen ns', 'Key'], rows);
     }
     function renderPaths() {
-      const rows = state.paths.map(p => `<tr class="clickable" onclick="selectPath(${JSON.stringify(p.resolved_traffic_path).replace(/"/g, '&quot;')})">
+      const rows = state.paths.map(p => `<tr class="clickable" onclick="selectPath(${jsArg(p.resolved_traffic_path)})">
         <td class="path">${esc(p.resolved_traffic_path)}</td>
         <td><code>${esc(p.traffic_path)}</code></td>
         <td><code>${esc(p.metadata_path)}</code></td>
@@ -599,7 +602,7 @@ INDEX_HTML = """<!doctype html>
         const flowRows = (state.selectedPathDetail.flows || []).map(f => {
           const share = pathRecords ? `${((Number(f.records || 0) / pathRecords) * 100).toFixed(1)}%` : '-';
           const sequenceRange = f.first_sequence == null ? '-' : `${f.first_sequence} - ${f.last_sequence}`;
-          return `<tr>
+          return `<tr class="clickable" onclick="loadFlow(${jsArg(f.flow_key)})">
             <td><code>${esc(f.flow_key || '-')}</code></td>
             <td>${esc(f.records || 0)}</td>
             <td>${esc(share)}</td>
@@ -648,7 +651,7 @@ INDEX_HTML = """<!doctype html>
     function renderRecentRecords() {
       const rows = state.recentRecords.map(r => {
         const hops = (r.hops || []).map(h => `${hopDeviceDisplay(h)}(${h.ingress_interface || h.ingress_logical_port || '-'}->${h.egress_interface || h.egress_logical_port || '-'})`).join(' -> ');
-        return `<tr>
+        return `<tr class="clickable" onclick="selectPath(${jsArg(r.resolved_traffic_path)})">
           <td>${esc(r.id)}</td>
           <td>${esc(r.sequence_number ?? '-')}</td>
           <td><code>${esc(r.flow_key || '-')}</code></td>
@@ -1394,7 +1397,7 @@ INDEX_HTML = """<!doctype html>
       const totalRecords = Number(flow.records || 0);
       const pathRows = (data.paths || []).map(p => {
         const share = totalRecords ? `${((Number(p.records || 0) / totalRecords) * 100).toFixed(1)}%` : '-';
-        return `<tr>
+        return `<tr class="clickable" onclick="selectPath(${jsArg(p.resolved_traffic_path)})">
           <td class="path"><code>${esc(p.resolved_traffic_path || '-')}</code></td>
           <td><code>${esc(p.traffic_path || '-')}</code></td>
           <td>${esc(p.records || 0)}</td>
