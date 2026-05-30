@@ -111,6 +111,31 @@ class Inventory:
             "logical_ports": sum(len(device.ports) for device in self.devices.values()),
         }
 
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "devices": {
+                str(device_id): {
+                    "name": device.name,
+                    "model": device.model,
+                    "role": device.role,
+                    "loopback_ip": device.loopback_ip,
+                    "ports": {
+                        str(port_id): {
+                            "interface": port.interface,
+                            "front_panel": port.front_panel,
+                            "speed": port.speed,
+                            "peer_device_id": port.peer_device_id,
+                            "peer_port": port.peer_port,
+                            "peer_name": port.peer_name,
+                        }
+                        for port_id, port in sorted(device.ports.items())
+                    },
+                }
+                for device_id, device in sorted(self.devices.items())
+            },
+            "stats": self.stats(),
+        }
+
     def resolve_hops(self, hops: list[HopMetadata], traffic_order: bool = False) -> list[dict[str, Any]]:
         ordered = list(reversed(hops)) if traffic_order else hops
         return [self.resolve_hop(hop) for hop in ordered]

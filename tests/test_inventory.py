@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from ifa_collector.inventory import Inventory
@@ -49,6 +50,26 @@ def test_inventory_updates_from_restconf_metadata_lanes() -> None:
     assert resolved[0]["egress"]["interface"] == "Ethernet48"
     assert resolved[0]["egress"]["front_panel"] == "Eth1/49"
     assert inventory.stats() == {"devices": 1, "logical_ports": 5}
+
+
+def test_inventory_exports_loadable_json(tmp_path: Path) -> None:
+    inventory = Inventory()
+    inventory.upsert_device_metadata(
+        {
+            "switch_id": 1001,
+            "hostname": "Border1",
+            "product_name": "7326-56X-O-AC-F",
+            "interfaces": {"Ethernet0": {"name": "Ethernet0", "alias": "Eth1/1", "speed": "10000", "lanes": "3"}},
+        }
+    )
+
+    path = tmp_path / "inventory.json"
+    path.write_text(json.dumps(inventory.as_dict()), encoding="utf-8")
+    loaded = Inventory.load(path)
+
+    assert loaded.stats() == {"devices": 1, "logical_ports": 1}
+    assert loaded.devices[1001].name == "Border1"
+    assert loaded.devices[1001].ports[3].interface == "Ethernet0"
 
 
 def test_inventory_updates_from_saved_topology_metadata() -> None:

@@ -349,6 +349,7 @@ INDEX_HTML = """<!doctype html>
         <div class="topology-actions">
           <button id="topoScan" class="primary">Scan</button>
           <button id="topoReload" class="secondary">Reload</button>
+          <button id="topoExportInventory" class="secondary">Export Inventory JSON</button>
           <button id="topoClear" class="secondary">Clear</button>
         </div>
         <div id="topologyPathDetail" class="status">Select a path to highlight it on the topology.</div>
@@ -1197,6 +1198,18 @@ INDEX_HTML = """<!doctype html>
       status.textContent = `Re-resolved ${result.records || 0} record(s), ${result.hops || 0} hop(s).`;
       await loadAll();
     }
+    async function exportInventoryJson() {
+      const payload = await api('/api/inventory');
+      const blob = new Blob([JSON.stringify(payload, null, 2) + '\\n'], {type: 'application/json'});
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'ifa-inventory.json';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(link.href);
+      document.getElementById('topologyStatus').textContent = `Exported inventory: ${payload.stats?.devices || 0} devices, ${payload.stats?.logical_ports || 0} logical ports.`;
+    }
     function splitTargets(text) {
       return String(text || '').split(/[\\s,]+/).map(item => item.trim()).filter(Boolean);
     }
@@ -1815,6 +1828,9 @@ INDEX_HTML = """<!doctype html>
       state.topology = await api('/api/topology');
       renderTopology();
     });
+    document.getElementById('topoExportInventory').addEventListener('click', () => exportInventoryJson().catch(err => {
+      document.getElementById('topologyStatus').textContent = err.message || String(err);
+    }));
     document.getElementById('topoAdd').addEventListener('click', addTopologyTarget);
     document.getElementById('refreshData').addEventListener('click', () => loadAll().catch(err => {
       document.getElementById('pcapStatus').textContent = err.message || String(err);
@@ -1955,6 +1971,8 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     topology = load_topology(topology_path)
                     inventory.update_from_topology(topology)
                     self._send_json(topology)
+                elif parsed.path == "/api/inventory":
+                    self._send_json(inventory.as_dict())
                 elif parsed.path == "/api/collector/status":
                     self._send_json(collector.status())
                 elif parsed.path == "/api/schemas":
