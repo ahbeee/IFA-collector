@@ -866,11 +866,13 @@ INDEX_HTML = """<!doctype html>
       renderCollector();
     }
     async function clearDbData() {
-      if (!confirm('Clear all IFA collector records from the active database? Topology and device credentials in this page stay unchanged.')) return;
       const status = document.getElementById('pcapStatus');
+      const stats = await api('/api/db/stats');
+      const summary = `${stats.records || 0} record(s), ${stats.hops || 0} hop(s), ${stats.imports || 0} import(s), ${stats.errors || 0} parse error(s)`;
+      if (!confirm(`Clear all IFA collector records from the active database?\n\nThis will delete ${summary}.\n\nTopology and device credentials in this page stay unchanged.`)) return;
       status.textContent = 'Clearing DB data...';
       const result = await api('/api/db/clear', {method: 'POST'});
-      status.textContent = `Cleared ${result.deleted_records || 0} record row(s).`;
+      status.textContent = `Cleared ${result.records || 0} record(s), ${result.hops || 0} hop(s), ${result.imports || 0} import(s), ${result.errors || 0} parse error(s).`;
       await loadAll();
     }
     async function reResolveDbData() {
@@ -1498,6 +1500,12 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     self._send_json(topology)
                 elif parsed.path == "/api/collector/status":
                     self._send_json(collector.status())
+                elif parsed.path == "/api/db/stats":
+                    store = SqliteStore(db_path)
+                    try:
+                        self._send_json(store.runtime_counts())
+                    finally:
+                        store.close()
                 elif parsed.path == "/api/flow-detail":
                     params = parse_qs(parsed.query)
                     flow_key = unquote(params.get("flow_key", [""])[0])
@@ -1594,13 +1602,11 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/collector/stop":
                     self._send_json(collector.stop())
                 elif parsed.path == "/api/db/clear":
-                    before = _runtime_row_count(db_path)
                     store = SqliteStore(db_path)
                     try:
-                        store.clear_runtime_data()
+                        self._send_json(store.clear_runtime_data())
                     finally:
                         store.close()
-                    self._send_json({"deleted_records": before})
                 elif parsed.path == "/api/db/reresolve":
                     store = SqliteStore(db_path)
                     try:
@@ -1657,24 +1663,6 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
 
 def _query(db_path: Path) -> QueryStore:
     return QueryStore(db_path)
-
-
-def _runtime_row_count(db_path: Path) -> int:
-    store = QueryStore(db_path)
-    try:
-        row = store.conn.execute(
-            """
-            SELECT
-                (SELECT COUNT(*) FROM hops) +
-                (SELECT COUNT(*) FROM ifa_records) +
-                (SELECT COUNT(*) FROM flows) +
-                (SELECT COUNT(*) FROM exporters) +
-                (SELECT COUNT(*) FROM parse_errors)
-            """
-        ).fetchone()
-        return int(row[0] or 0)
-    finally:
-        store.close()
 
 
 def _limit(query: str) -> int:

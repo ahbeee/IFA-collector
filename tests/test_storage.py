@@ -125,3 +125,40 @@ def test_sqlite_store_deletes_import_run_and_rebuilds_counts(tmp_path: Path) -> 
     assert conn.execute("SELECT records FROM flows").fetchone()[0] == 1
     assert conn.execute("SELECT records FROM exporters").fetchone()[0] == 1
     conn.close()
+
+
+def test_sqlite_store_reports_and_clears_runtime_counts(tmp_path: Path) -> None:
+    packet = ParsedIfaPacket(
+        flow_key=FlowKey("1.1.1.1", "4.4.4.4", 17, 12345, 5000),
+        ifa_header=IfaHeader(2, 15, 17, 0, 255),
+        metadata_header=IfaMetadataHeader(255, 255, 30, 24),
+        checksum_header=None,
+        fragment_header=None,
+        hops=[
+            HopMetadata(b"", {"device_id": 1001, "ingress_logical_port": 3, "egress_logical_port": 79}),
+            HopMetadata(b"", {"device_id": 1002, "ingress_logical_port": 79, "egress_logical_port": 3}),
+        ],
+        raw_metadata_stack=b"abc",
+        post_metadata_payload=b"def",
+        raw_packet=b"abcdef",
+        wrapper={
+            "sequence_number": 10,
+            "observation_domain_id": 305419896,
+            "set_id": 257,
+            "transport": {"src_ip": "10.0.0.1", "src_port": 9070, "dst_ip": "192.0.2.1", "dst_port": 9090},
+        },
+    )
+    store = SqliteStore(tmp_path / "ifa.sqlite")
+    import_id = store.record_import_run(100, "capture.pcap", 0, 0)
+    store.insert_packet(1000, packet, Inventory(), import_id=import_id)
+    store.insert_error(1001, "bad one", import_id=import_id)
+    store.commit()
+
+    counts = store.runtime_counts()
+    cleared = store.clear_runtime_data()
+    after = store.runtime_counts()
+    store.close()
+
+    assert counts == {"imports": 1, "records": 1, "hops": 2, "flows": 1, "exporters": 1, "errors": 1, "rows": 7}
+    assert cleared == counts
+    assert after == {"imports": 0, "records": 0, "hops": 0, "flows": 0, "exporters": 0, "errors": 0, "rows": 0}

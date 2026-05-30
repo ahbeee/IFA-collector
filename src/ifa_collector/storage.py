@@ -210,7 +210,25 @@ class SqliteStore:
     def commit(self) -> None:
         self.conn.commit()
 
-    def clear_runtime_data(self) -> None:
+    def runtime_counts(self) -> dict[str, int]:
+        row = self.conn.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM import_runs) AS imports,
+                (SELECT COUNT(*) FROM ifa_records) AS records,
+                (SELECT COUNT(*) FROM hops) AS hops,
+                (SELECT COUNT(*) FROM flows) AS flows,
+                (SELECT COUNT(*) FROM exporters) AS exporters,
+                (SELECT COUNT(*) FROM parse_errors) AS errors
+            """
+        ).fetchone()
+        keys = ["imports", "records", "hops", "flows", "exporters", "errors"]
+        counts = {key: int(row[index] or 0) for index, key in enumerate(keys)}
+        counts["rows"] = sum(counts.values())
+        return counts
+
+    def clear_runtime_data(self) -> dict[str, int]:
+        before = self.runtime_counts()
         self.conn.executescript(
             """
             DELETE FROM hops;
@@ -222,6 +240,7 @@ class SqliteStore:
             """
         )
         self.conn.commit()
+        return before
 
     def delete_import_run(self, import_id: int) -> dict[str, int]:
         records = int(
