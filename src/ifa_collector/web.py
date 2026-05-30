@@ -294,6 +294,7 @@ INDEX_HTML = """<!doctype html>
       <div class="panel"><h2>Recent IFA Records</h2><div id="recentRecordsTable"></div></div>
       <div class="panel"><h2>Record Detail</h2><div id="recordDetail" class="detail">Select a recent record.</div></div>
       <div class="panel"><h2>PCAP Import History</h2><div id="importsTable"></div></div>
+      <div class="panel"><h2>PCAP Import Detail</h2><div id="importDetail" class="detail">Select an import.</div></div>
       <div class="panel"><h2>Exporters</h2><div id="exportersTable"></div></div>
     </section>
 
@@ -548,6 +549,7 @@ INDEX_HTML = """<!doctype html>
       renderErrors();
       renderRecentRecords();
       renderImports();
+      renderImportDetail();
       renderCollector();
     }
     function renderExporters() {
@@ -737,6 +739,36 @@ INDEX_HTML = """<!doctype html>
       </tr>`);
       const label = state.selectedImportId ? `Filtering by import #${state.selectedImportId}` : 'Showing all records';
       document.getElementById('importsTable').innerHTML = `<div class="status">${esc(label)} ${state.selectedImportId ? '<button class="secondary" onclick="clearImportFilter()">Clear Import Filter</button>' : ''}</div>` + table(['Import', 'Imported At', 'Source', 'Parsed', 'DB Records', 'Hops', 'Flows', 'Paths', 'Exporters', 'Errors', 'First Seen', 'Last Seen', 'Action'], rows);
+    }
+    function renderImportDetail() {
+      const target = document.getElementById('importDetail');
+      if (!state.selectedImportId) {
+        target.textContent = 'Select an import.';
+        return;
+      }
+      const item = state.imports.find(importRun => Number(importRun.id) === Number(state.selectedImportId));
+      if (!item) {
+        target.textContent = `Import #${state.selectedImportId} is not in the current import history list.`;
+        return;
+      }
+      const filterActions = `<div class="inline-actions">
+        <button class="secondary" onclick="clearImportFilter()">Clear Import Filter</button>
+      </div>`;
+      target.innerHTML = `<div class="kv">
+        <strong>Import</strong><span>${esc(item.id)}</span>
+        <strong>Imported At</strong><span>${esc(formatNsTime(item.imported_at_ns))}</span>
+        <strong>Source</strong><code>${esc(item.source || '-')}</code>
+        <strong>Parsed Records</strong><span>${esc(item.parsed_ifa_records || 0)}</span>
+        <strong>DB Records</strong><span>${esc(item.db_records || 0)}</span>
+        <strong>Hops</strong><span>${esc(item.db_hops || 0)}</span>
+        <strong>Flows</strong><span>${esc(item.flows || 0)}</span>
+        <strong>Paths</strong><span>${esc(item.paths || 0)}</span>
+        <strong>Exporters</strong><span>${esc(item.exporters || 0)}</span>
+        <strong>Parse Errors</strong><span class="${item.parse_errors ? 'bad' : ''}">${esc(item.parse_errors || 0)}</span>
+        <strong>First Seen</strong><span>${esc(formatNsTime(item.first_seen_ns))}</span>
+        <strong>Last Seen</strong><span>${esc(formatNsTime(item.last_seen_ns))}</span>
+      </div>
+      ${filterActions}`;
     }
     async function selectImport(importId) {
       state.selectedImportId = Number(importId);
