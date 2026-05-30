@@ -572,10 +572,12 @@ INDEX_HTML = """<!doctype html>
         <td>${esc(f.records)}</td>
         <td>${esc(f.paths)}</td>
         <td>${esc(hopRange(f))}</td>
-        <td>${esc(f.last_seen_ns)}</td>
+        <td>${esc(formatNsTime(f.first_seen_ns))}</td>
+        <td>${esc(formatNsTime(f.last_seen_ns))}</td>
+        <td>${esc(formatNsAge(f.last_seen_ns))}</td>
         <td><code>${esc(f.flow_key)}</code></td>
       </tr>`);
-      document.getElementById('flowsTable').innerHTML = table(['Flow', 'Proto', 'Records', 'Paths', 'Hops', 'Last Seen ns', 'Key'], rows);
+      document.getElementById('flowsTable').innerHTML = table(['Flow', 'Proto', 'Records', 'Paths', 'Hops', 'First Seen', 'Last Seen', 'Idle', 'Key'], rows);
     }
     function renderPaths() {
       const rows = state.paths.map(p => `<tr class="clickable" onclick="selectPath(${jsArg(p.resolved_traffic_path)})">
@@ -586,8 +588,11 @@ INDEX_HTML = """<!doctype html>
         <td>${esc(p.flows)}</td>
         <td>${esc(hopRange(p))}</td>
         <td>${esc(p.records)}</td>
+        <td>${esc(formatNsTime(p.first_seen_ns))}</td>
+        <td>${esc(formatNsTime(p.last_seen_ns))}</td>
+        <td>${esc(formatNsAge(p.last_seen_ns))}</td>
       </tr>`);
-      document.getElementById('pathsTable').innerHTML = table(['Resolved Traffic Path', 'Traffic Order', 'Metadata Order', 'Unresolved', 'Flows', 'Hops', 'Records'], rows);
+      document.getElementById('pathsTable').innerHTML = table(['Resolved Traffic Path', 'Traffic Order', 'Metadata Order', 'Unresolved', 'Flows', 'Hops', 'Records', 'First Seen', 'Last Seen', 'Idle'], rows);
     }
     function unresolvedTotal(row) {
       return (row?.unresolved_devices || 0) + (row?.unresolved_ingress_ports || 0) + (row?.unresolved_egress_ports || 0);

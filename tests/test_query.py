@@ -64,9 +64,13 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert flow["paths"] == 2
     assert flow["min_hops"] == 1
     assert flow["max_hops"] == 2
+    assert flow["first_seen_ns"] == 10
+    assert flow["last_seen_ns"] == 30
     path = store.paths()[0]
     assert path["resolved_traffic_path"] == "A -> B"
     assert path["flows"] == 1
+    assert path["first_seen_ns"] == 10
+    assert path["last_seen_ns"] == 10
     assert path["min_hops"] == 2
     assert path["max_hops"] == 2
     assert path["total_hops"] == 2

@@ -126,6 +126,8 @@ class QueryStore:
                     r.resolved_traffic_path, r.traffic_path, r.metadata_path,
                     COUNT(DISTINCT r.id) AS records,
                     COUNT(DISTINCT r.flow_key) AS flows,
+                    MIN(r.timestamp_ns) AS first_seen_ns,
+                    MAX(r.timestamp_ns) AS last_seen_ns,
                     MIN(r.hop_count) AS min_hops,
                     MAX(r.hop_count) AS max_hops,
                     COUNT(h.id) AS total_hops,
