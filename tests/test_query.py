@@ -52,6 +52,10 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
 
     store = QueryStore(db)
     assert store.exporters()[0]["exporter_key"] == "exp"
+    exporter_one = store.exporters(import_id=1)[0]
+    assert exporter_one["records"] == 1
+    assert exporter_one["first_sequence"] == 1
+    assert exporter_one["last_sequence"] == 1
     flow = store.flows()[0]
     assert flow["flow_key"] == "flow"
     assert flow["paths"] == 2
@@ -68,6 +72,12 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert path["unresolved_egress_ports"] == 1
     assert store.resolution_summary() == {
         "hops": 3,
+        "unresolved_devices": 1,
+        "unresolved_ingress_ports": 1,
+        "unresolved_egress_ports": 1,
+    }
+    assert store.resolution_summary(import_id=1) == {
+        "hops": 2,
         "unresolved_devices": 1,
         "unresolved_ingress_ports": 1,
         "unresolved_egress_ports": 1,

@@ -30,7 +30,32 @@ class QueryStore:
         _ensure_column(self.conn, "parse_errors", "import_id", "INTEGER")
         self.conn.commit()
 
-    def exporters(self) -> list[dict[str, Any]]:
+    def exporters(self, import_id: int | None = None) -> list[dict[str, Any]]:
+        if import_id is not None:
+            return _rows_to_dicts(
+                self.conn.execute(
+                    """
+                    SELECT
+                        r.exporter_key,
+                        e.src_ip, e.src_port, e.dst_ip, e.dst_port, r.observation_domain_id,
+                        MIN(r.sequence_number) AS first_sequence,
+                        MAX(r.sequence_number) AS last_sequence,
+                        COUNT(*) AS records,
+                        CASE
+                            WHEN MIN(r.sequence_number) IS NULL OR MAX(r.sequence_number) IS NULL THEN 0
+                            ELSE MAX(r.sequence_number) - MIN(r.sequence_number) + 1 - COUNT(DISTINCT r.sequence_number)
+                        END AS gaps,
+                        COUNT(r.sequence_number) - COUNT(DISTINCT r.sequence_number) AS duplicate_or_reordered,
+                        MAX(r.timestamp_ns) AS last_seen_ns
+                    FROM ifa_records AS r
+                    LEFT JOIN exporters AS e ON e.exporter_key = r.exporter_key
+                    WHERE r.import_id = ? AND r.exporter_key IS NOT NULL
+                    GROUP BY r.exporter_key, e.src_ip, e.src_port, e.dst_ip, e.dst_port, r.observation_domain_id
+                    ORDER BY records DESC
+                    """,
+                    (import_id,),
+                )
+            )
         return _rows_to_dicts(
             self.conn.execute(
                 """
@@ -112,16 +137,22 @@ class QueryStore:
             )
         )
 
-    def resolution_summary(self) -> dict[str, int]:
+    def resolution_summary(self, import_id: int | None = None) -> dict[str, int]:
+        join = "JOIN ifa_records AS r ON r.id = h.record_id" if import_id is not None else ""
+        where = "WHERE r.import_id = ?" if import_id is not None else ""
+        params: tuple[Any, ...] = (import_id,) if import_id is not None else ()
         row = self.conn.execute(
-            """
+            f"""
             SELECT
                 COUNT(*) AS hops,
                 SUM(CASE WHEN device_name IS NULL THEN 1 ELSE 0 END) AS unresolved_devices,
                 SUM(CASE WHEN ingress_logical_port IS NOT NULL AND ingress_interface IS NULL THEN 1 ELSE 0 END) AS unresolved_ingress_ports,
                 SUM(CASE WHEN egress_logical_port IS NOT NULL AND egress_interface IS NULL THEN 1 ELSE 0 END) AS unresolved_egress_ports
-            FROM hops
-            """
+            FROM hops AS h
+            {join}
+            {where}
+            """,
+            params,
         ).fetchone()
         return {key: int(row[key] or 0) for key in row.keys()}
 

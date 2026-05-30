@@ -515,7 +515,7 @@ INDEX_HTML = """<!doctype html>
     async function loadAll() {
       const importQuery = state.selectedImportId ? `&import_id=${encodeURIComponent(state.selectedImportId)}` : '';
       const [exporters, flows, paths, recentRecords, imports, errors, unresolved, topology, collector, resolution] = await Promise.all([
-        api('/api/exporters'), api(`/api/flows?limit=100${importQuery}`), api(`/api/paths?limit=100${importQuery}`), api(`/api/recent-records?limit=10${importQuery}`), api('/api/imports?limit=10'), api(`/api/errors?limit=100${importQuery}`), api(`/api/unresolved-hops?limit=100${importQuery}`), api('/api/topology'), api('/api/collector/status'), api('/api/resolution')
+        api(`/api/exporters?${importQuery.slice(1)}`), api(`/api/flows?limit=100${importQuery}`), api(`/api/paths?limit=100${importQuery}`), api(`/api/recent-records?limit=10${importQuery}`), api('/api/imports?limit=10'), api(`/api/errors?limit=100${importQuery}`), api(`/api/unresolved-hops?limit=100${importQuery}`), api('/api/topology'), api('/api/collector/status'), api(`/api/resolution?${importQuery.slice(1)}`)
       ]);
       state.exporters = exporters.exporters;
       state.flows = flows.flows;
@@ -1482,7 +1482,7 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 if parsed.path == "/":
                     self._send_html(INDEX_HTML)
                 elif parsed.path == "/api/exporters":
-                    self._send_json({"exporters": _query(db_path).exporters()})
+                    self._send_json({"exporters": _query(db_path).exporters(_import_id(parsed.query))})
                 elif parsed.path == "/api/flows":
                     limit = _limit(parsed.query)
                     self._send_json({"flows": _query(db_path).flows(limit, _import_id(parsed.query))})
@@ -1503,7 +1503,7 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     finally:
                         store.close()
                 elif parsed.path == "/api/resolution":
-                    self._send_json(_query(db_path).resolution_summary())
+                    self._send_json(_query(db_path).resolution_summary(_import_id(parsed.query)))
                 elif parsed.path == "/api/unresolved-hops":
                     limit = _limit(parsed.query)
                     self._send_json({"unresolved_hops": _query(db_path).unresolved_hops(limit, _import_id(parsed.query))})
