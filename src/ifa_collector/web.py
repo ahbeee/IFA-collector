@@ -1303,6 +1303,7 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
     topology_path = topology_path or Path("topology/topology.json")
     registry = SchemaRegistry.load_default()
     inventory = Inventory()
+    inventory.update_from_topology(load_topology(topology_path))
     collector = UdpIngestCollector(db_path, registry, inventory)
 
     class Handler(BaseHTTPRequestHandler):
@@ -1325,7 +1326,9 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     limit = _limit(parsed.query)
                     self._send_json({"errors": _query(db_path).errors(limit)})
                 elif parsed.path == "/api/topology":
-                    self._send_json(load_topology(topology_path))
+                    topology = load_topology(topology_path)
+                    inventory.update_from_topology(topology)
+                    self._send_json(topology)
                 elif parsed.path == "/api/collector/status":
                     self._send_json(collector.status())
                 elif parsed.path == "/api/flow-detail":

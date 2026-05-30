@@ -49,3 +49,31 @@ def test_inventory_updates_from_restconf_metadata_lanes() -> None:
     assert resolved[0]["egress"]["interface"] == "Ethernet48"
     assert resolved[0]["egress"]["front_panel"] == "Eth1/49"
     assert inventory.stats() == {"devices": 1, "logical_ports": 5}
+
+
+def test_inventory_updates_from_saved_topology_metadata() -> None:
+    inventory = Inventory()
+    inventory.update_from_topology(
+        {
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "Border1",
+                        "metadata": {
+                            "switch_id": 1001,
+                            "product_name": "7326-56X-O-AC-F",
+                            "interfaces": {
+                                "Ethernet0": {"name": "Ethernet0", "alias": "Eth1/1", "lanes": "3", "speed": "10000"}
+                            },
+                        },
+                    }
+                ]
+            }
+        }
+    )
+
+    hop = HopMetadata(raw=b"", fields={"device_id": 1001, "ingress_logical_port": 3})
+    resolved = inventory.resolve_hop(hop)
+
+    assert resolved["device_name"] == "Border1"
+    assert resolved["ingress"]["interface"] == "Ethernet0"
