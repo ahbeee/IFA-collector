@@ -205,9 +205,14 @@ INDEX_HTML = """<!doctype html>
       margin-bottom: 12px;
       background: #fbfcfd;
     }
-    .form-section h3 {
-      margin: 0 0 10px;
+    .form-section summary {
+      cursor: pointer;
+      font-weight: 650;
       font-size: 13px;
+      color: var(--text);
+    }
+    .form-section[open] summary {
+      margin-bottom: 10px;
     }
     .table-actions {
       display: flex;
@@ -378,8 +383,8 @@ INDEX_HTML = """<!doctype html>
       <div class="panel">
         <h2>Configuration Preview / Apply</h2>
         <div style="padding: 12px 14px;">
-          <div class="form-section">
-            <h3>Switch</h3>
+          <details class="form-section">
+            <summary>Switch</summary>
             <div class="form-grid">
               <div><label for="tamSwitchId">Switch ID</label><input id="tamSwitchId" type="number" placeholder="1001"></div>
               <div><label for="tamEnterpriseId">Enterprise ID</label><input id="tamEnterpriseId" type="number" placeholder="4434"></div>
@@ -388,9 +393,9 @@ INDEX_HTML = """<!doctype html>
             </div>
             <button id="tamDeleteSwitchId" class="mini">Queue Delete Switch ID</button>
             <button id="tamDeleteEnterpriseId" class="mini">Queue Delete Enterprise ID</button>
-          </div>
-          <div class="form-section">
-            <h3>Add Collector</h3>
+          </details>
+          <details class="form-section">
+            <summary>Add Collector</summary>
             <div class="form-grid">
               <div><label for="tamCollectorName">Name</label><input id="tamCollectorName" placeholder="ifa_collector"></div>
               <div><label for="tamCollectorIp">IP</label><input id="tamCollectorIp" placeholder="192.168.100.100"></div>
@@ -399,17 +404,17 @@ INDEX_HTML = """<!doctype html>
               <div><label for="tamCollectorVrf">VRF</label><select id="tamCollectorVrf"></select></div>
               <button id="tamAddCollector" class="secondary">Queue Add</button>
             </div>
-          </div>
-          <div class="form-section">
-            <h3>Add Sampler</h3>
+          </details>
+          <details class="form-section">
+            <summary>Add Sampler</summary>
             <div class="form-grid">
               <div><label for="tamSamplerName">Name</label><input id="tamSamplerName" placeholder="ifa_samp"></div>
               <div><label for="tamSamplerRate">Sampling Rate</label><input id="tamSamplerRate" type="number" value="1"></div>
               <button id="tamAddSampler" class="secondary">Queue Add</button>
             </div>
-          </div>
-          <div class="form-section">
-            <h3>Add Flow Group</h3>
+          </details>
+          <details class="form-section">
+            <summary>Add Flow Group</summary>
             <div class="form-grid">
               <div><label for="tamFgName">Name</label><input id="tamFgName" placeholder="s01_to_s02_udp"></div>
               <div><label for="tamFgId">ID</label><input id="tamFgId" type="number" placeholder="30"></div>
@@ -427,9 +432,9 @@ INDEX_HTML = """<!doctype html>
               <div><label for="tamFgDstPort">DST L4 Port</label><input id="tamFgDstPort" type="number"></div>
               <button id="tamAddFlowgroup" class="secondary">Queue Add</button>
             </div>
-          </div>
-          <div class="form-section">
-            <h3>Add IFA Session</h3>
+          </details>
+          <details class="form-section">
+            <summary>Add IFA Session</summary>
             <div class="form-grid">
               <div><label for="tamSessionName">Name</label><input id="tamSessionName" placeholder="ifa_s01_to_s02_UDP"></div>
               <div><label for="tamSessionFlowgroup">Flow Group</label><select id="tamSessionFlowgroup"></select></div>
@@ -438,7 +443,7 @@ INDEX_HTML = """<!doctype html>
               <div><label for="tamSessionSampler">Sampler</label><select id="tamSessionSampler"></select></div>
               <button id="tamAddSession" class="secondary">Queue Add</button>
             </div>
-          </div>
+          </details>
           <div class="status" style="padding: 6px 0 0;">Changes are queued locally. Preview builds RESTCONF requests only. Apply sends them to the selected device.</div>
           <button id="tamPreview" class="secondary" style="margin-top: 8px;">Preview</button>
           <button id="tamApply" class="primary" style="margin-top: 8px;">Apply</button>
