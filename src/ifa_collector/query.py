@@ -266,6 +266,11 @@ class QueryStore:
                 )
             )
             item = dict(record)
+            for hop in hops:
+                try:
+                    hop["fields"] = json.loads(hop.get("fields_json") or "{}")
+                except json.JSONDecodeError:
+                    hop["fields"] = {}
             item["hops"] = hops
             records.append(item)
 

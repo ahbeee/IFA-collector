@@ -113,6 +113,7 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert flow_detail["paths"][0]["first_seen_ns"] == 10
     assert flow_detail["paths"][0]["last_seen_ns"] == 10
     assert [record["id"] for record in flow_detail["sample_records"]] == [1]
+    assert flow_detail["sample_records"][0]["hops"][0]["fields"]["queue_id"] == 0
     recent = store.recent_records(import_id=1)
     assert recent[0]["id"] == 1
     assert recent[0]["resolved_traffic_path"] == "A -> B"

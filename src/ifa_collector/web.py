@@ -1737,12 +1737,13 @@ INDEX_HTML = """<!doctype html>
         </tr>`;
       });
       const records = data.sample_records.map(r => `<div>
-        <p><span class="pill">seq ${esc(r.sequence_number)}</span> <code>${esc(r.resolved_traffic_path)}</code></p>
+        <p><span class="pill">record ${esc(r.id)}</span> <span class="pill">seq ${esc(r.sequence_number)}</span> <code>${esc(r.resolved_traffic_path)}</code></p>
         <div class="hopline">${r.hops.map((h, i) => `<div class="hop">
           <strong>${esc(hopDeviceDisplay(h))}</strong><br>
           ${h.model ? `${esc(h.model)}<br>` : ''}
-          ingress ${esc(h.ingress_interface || h.ingress_logical_port)} -> egress ${esc(h.egress_interface || h.egress_logical_port)}<br>
-          ttl ${esc(h.ttl)}
+          ${esc(hopPortDetail(h))}<br>
+          ttl ${esc(h.ttl || '-')}<br>
+          <code>${esc(hopFieldSummary(h))}</code>
         </div>${i < r.hops.length - 1 ? '<span class="arrow">-></span>' : ''}`).join('')}</div>
       </div>`).join('');
       document.getElementById('flowDetail').innerHTML = `<div class="kv">
