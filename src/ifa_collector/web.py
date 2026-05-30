@@ -292,6 +292,7 @@ INDEX_HTML = """<!doctype html>
         <div id="collectorStatus" class="status">Collector status not loaded.</div>
       </div>
       <div class="panel"><h2>Recent IFA Records</h2><div id="recentRecordsTable"></div></div>
+      <div class="panel"><h2>PCAP Import History</h2><div id="importsTable"></div></div>
       <div class="panel"><h2>Exporters</h2><div id="exportersTable"></div></div>
     </section>
 
@@ -427,7 +428,7 @@ INDEX_HTML = """<!doctype html>
   </main>
   <script>
     const state = {
-      exporters: [], flows: [], paths: [], recentRecords: [], errors: [], unresolved: [], topology: null, tam: null,
+      exporters: [], flows: [], paths: [], recentRecords: [], imports: [], errors: [], unresolved: [], topology: null, tam: null,
       resolution: null,
       devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
       collector: null, selectedTopologyNode: null, selectedPath: null, selectedPathDetail: null
@@ -512,13 +513,14 @@ INDEX_HTML = """<!doctype html>
       return epochSeconds ? new Date(epochSeconds * 1000).toLocaleString() : '-';
     }
     async function loadAll() {
-      const [exporters, flows, paths, recentRecords, errors, unresolved, topology, collector, resolution] = await Promise.all([
-        api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/recent-records?limit=10'), api('/api/errors'), api('/api/unresolved-hops?limit=100'), api('/api/topology'), api('/api/collector/status'), api('/api/resolution')
+      const [exporters, flows, paths, recentRecords, imports, errors, unresolved, topology, collector, resolution] = await Promise.all([
+        api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/recent-records?limit=10'), api('/api/imports?limit=10'), api('/api/errors'), api('/api/unresolved-hops?limit=100'), api('/api/topology'), api('/api/collector/status'), api('/api/resolution')
       ]);
       state.exporters = exporters.exporters;
       state.flows = flows.flows;
       state.paths = paths.paths;
       state.recentRecords = recentRecords.records;
+      state.imports = imports.imports;
       state.errors = errors.errors;
       state.unresolved = unresolved.unresolved_hops;
       state.topology = topology;
@@ -538,6 +540,7 @@ INDEX_HTML = """<!doctype html>
       renderTam();
       renderErrors();
       renderRecentRecords();
+      renderImports();
       renderCollector();
     }
     function renderExporters() {
@@ -637,8 +640,22 @@ INDEX_HTML = """<!doctype html>
       });
       document.getElementById('recentRecordsTable').innerHTML = table(['Record', 'Seq', 'Flow', 'Path', 'Hops'], rows);
     }
+    function renderImports() {
+      const rows = state.imports.map(item => `<tr>
+        <td>${esc(item.id)}</td>
+        <td>${esc(formatNsTime(item.imported_at_ns))}</td>
+        <td><code>${esc(item.source || '-')}</code></td>
+        <td>${esc(item.parsed_ifa_records || 0)}</td>
+        <td class="${item.parse_errors ? 'bad' : ''}">${esc(item.parse_errors || 0)}</td>
+      </tr>`);
+      document.getElementById('importsTable').innerHTML = table(['Import', 'Imported At', 'Source', 'Records', 'Errors'], rows);
+    }
     function formatRate(value) {
       return Number(value || 0).toFixed(2);
+    }
+    function formatNsTime(ns) {
+      if (!ns) return '-';
+      return new Date(Number(ns) / 1e6).toLocaleString();
     }
     function formatDuration(seconds) {
       const value = Math.max(0, Math.floor(Number(seconds || 0)));
@@ -794,7 +811,8 @@ INDEX_HTML = """<!doctype html>
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({path})
       });
-      status.textContent = `Imported ${result.parsed_ifa_records || 0} IFA record(s), ${result.parse_errors || 0} parse error(s).`;
+      const importId = result.import_id ? ` as import #${result.import_id}` : '';
+      status.textContent = `Imported ${result.parsed_ifa_records || 0} IFA record(s), ${result.parse_errors || 0} parse error(s)${importId}.`;
       await loadAll();
     }
     async function startCollector() {
@@ -1433,6 +1451,9 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/recent-records":
                     limit = _limit(parsed.query)
                     self._send_json({"records": _query(db_path).recent_records(limit)})
+                elif parsed.path == "/api/imports":
+                    limit = _limit(parsed.query)
+                    self._send_json({"imports": _query(db_path).import_runs(limit)})
                 elif parsed.path == "/api/resolution":
                     self._send_json(_query(db_path).resolution_summary())
                 elif parsed.path == "/api/unresolved-hops":

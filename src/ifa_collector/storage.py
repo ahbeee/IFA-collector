@@ -92,6 +92,14 @@ class SqliteStore:
                 error TEXT NOT NULL,
                 count INTEGER NOT NULL DEFAULT 1
             );
+
+            CREATE TABLE IF NOT EXISTS import_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                imported_at_ns INTEGER NOT NULL,
+                source TEXT,
+                parsed_ifa_records INTEGER NOT NULL DEFAULT 0,
+                parse_errors INTEGER NOT NULL DEFAULT 0
+            );
             """
         )
         self.conn.commit()
@@ -101,6 +109,16 @@ class SqliteStore:
             "INSERT INTO parse_errors(timestamp_ns, error, count) VALUES (?, ?, 1)",
             (timestamp_ns, error),
         )
+
+    def record_import_run(self, imported_at_ns: int, source: str | None, parsed_ifa_records: int, parse_errors: int) -> int:
+        cursor = self.conn.execute(
+            """
+            INSERT INTO import_runs(imported_at_ns, source, parsed_ifa_records, parse_errors)
+            VALUES (?, ?, ?, ?)
+            """,
+            (imported_at_ns, source, parsed_ifa_records, parse_errors),
+        )
+        return int(cursor.lastrowid)
 
     def insert_packet(self, timestamp_ns: int | None, packet: Any, inventory: Inventory) -> None:
         wrapper = packet.wrapper or {}
@@ -183,6 +201,7 @@ class SqliteStore:
             DELETE FROM flows;
             DELETE FROM exporters;
             DELETE FROM parse_errors;
+            DELETE FROM import_runs;
             """
         )
         self.conn.commit()

@@ -31,11 +31,16 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
             raw_hex TEXT, fields_json TEXT
         );
         CREATE TABLE parse_errors (id INTEGER PRIMARY KEY, timestamp_ns INTEGER, error TEXT, count INTEGER);
+        CREATE TABLE import_runs (
+            id INTEGER PRIMARY KEY, imported_at_ns INTEGER, source TEXT,
+            parsed_ifa_records INTEGER, parse_errors INTEGER
+        );
         INSERT INTO exporters VALUES ('exp', '10.0.0.1', 9070, '192.0.2.1', 9090, 1, 1, 2, 2, 0, 0, 20);
         INSERT INTO flows VALUES ('flow', '1.1.1.1', '4.4.4.4', 17, 1, 2, NULL, 1, 10, 20);
         INSERT INTO ifa_records VALUES (1, 10, 'exp', 1, 1, 257, 'flow', '2 -> 1', '1 -> 2', 'A -> B', 2, '', '');
         INSERT INTO hops VALUES (1, 1, 0, 0, 1001, 'A', 'model', 3, 'Ethernet0', 79, 'Ethernet48', 63, '', '{}');
         INSERT INTO hops VALUES (2, 1, 1, 1, 1002, NULL, NULL, 3, NULL, 79, NULL, 62, '', '{}');
+        INSERT INTO import_runs VALUES (1, 123000000000, 'sample.pcap', 2, 1);
         """
     )
     conn.commit()
@@ -77,4 +82,8 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert recent[0]["id"] == 1
     assert recent[0]["resolved_traffic_path"] == "A -> B"
     assert [hop["device_id"] for hop in recent[0]["hops"]] == [1001, 1002]
+    imports = store.import_runs()
+    assert imports[0]["source"] == "sample.pcap"
+    assert imports[0]["parsed_ifa_records"] == 2
+    assert imports[0]["parse_errors"] == 1
     store.close()

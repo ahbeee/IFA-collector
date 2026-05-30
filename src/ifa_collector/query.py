@@ -9,9 +9,24 @@ class QueryStore:
     def __init__(self, path: Path):
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
+        self._ensure_optional_schema()
 
     def close(self) -> None:
         self.conn.close()
+
+    def _ensure_optional_schema(self) -> None:
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS import_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                imported_at_ns INTEGER NOT NULL,
+                source TEXT,
+                parsed_ifa_records INTEGER NOT NULL DEFAULT 0,
+                parse_errors INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        self.conn.commit()
 
     def exporters(self) -> list[dict[str, Any]]:
         return _rows_to_dicts(
@@ -242,6 +257,19 @@ class QueryStore:
             )
             records.append(item)
         return records
+
+    def import_runs(self, limit: int = 20) -> list[dict[str, Any]]:
+        return _rows_to_dicts(
+            self.conn.execute(
+                """
+                SELECT id, imported_at_ns, source, parsed_ifa_records, parse_errors
+                FROM import_runs
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        )
 
     def errors(self, limit: int = 20) -> list[dict[str, Any]]:
         return _rows_to_dicts(

@@ -21,10 +21,14 @@ class IngestResult:
     parsed_ifa_records: int = 0
     parse_errors: int = 0
     source: str | None = None
+    import_id: int | None = None
+    imported_at_ns: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "source": self.source,
+            "import_id": self.import_id,
+            "imported_at_ns": self.imported_at_ns,
             "parsed_ifa_records": self.parsed_ifa_records,
             "parse_errors": self.parse_errors,
         }
@@ -85,6 +89,13 @@ def ingest_pcap(
                 result.parsed_ifa_records += 1
                 if result.parsed_ifa_records % 5000 == 0:
                     store.commit()
+        result.imported_at_ns = time.time_ns()
+        result.import_id = store.record_import_run(
+            result.imported_at_ns,
+            result.source,
+            result.parsed_ifa_records,
+            result.parse_errors,
+        )
         store.commit()
     finally:
         store.close()

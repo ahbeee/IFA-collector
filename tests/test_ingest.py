@@ -11,10 +11,16 @@ def test_ingest_pcap_writes_records(tmp_path: Path) -> None:
 
     assert result.parsed_ifa_records == 125
     assert result.parse_errors == 0
+    assert result.import_id == 1
+    assert result.imported_at_ns is not None
 
     store = QueryStore(db)
     try:
         assert store.flows(1)
         assert store.paths(1)
+        imports = store.import_runs()
+        assert imports[0]["source"].endswith("IFA udp.pcap")
+        assert imports[0]["parsed_ifa_records"] == 125
+        assert imports[0]["parse_errors"] == 0
     finally:
         store.close()
