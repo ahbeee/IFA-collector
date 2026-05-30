@@ -295,7 +295,13 @@ INDEX_HTML = """<!doctype html>
       <div class="panel"><h2>Record Detail</h2><div id="recordDetail" class="detail">Select a recent record.</div></div>
       <div class="panel"><h2>PCAP Import History</h2><div id="importsTable"></div></div>
       <div class="panel"><h2>PCAP Import Detail</h2><div id="importDetail" class="detail">Select an import.</div></div>
-      <div class="panel"><h2>Exporters</h2><div id="exportersTable"></div></div>
+      <div class="panel">
+        <h2>Exporters</h2>
+        <div class="inline-actions">
+          <div><label for="exporterFilter">Filter</label><input id="exporterFilter" placeholder="exporter IP, port, ODID, sequence"></div>
+        </div>
+        <div id="exportersTable"></div>
+      </div>
     </section>
 
     <section id="flows">
@@ -448,7 +454,7 @@ INDEX_HTML = """<!doctype html>
       resolution: null,
       devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
       collector: null, selectedTopologyNode: null, selectedPath: null, selectedPathDetail: null, selectedImportId: null,
-      flowFilter: '', pathFilter: ''
+      exporterFilter: '', flowFilter: '', pathFilter: ''
     };
 
     async function api(path, options) {
@@ -566,7 +572,11 @@ INDEX_HTML = """<!doctype html>
       renderCollector();
     }
     function renderExporters() {
-      const rows = state.exporters.map(e => `<tr>
+      const filtered = state.exporters.filter(e => rowMatches(e, state.exporterFilter, [
+        e.exporter_key, e.src_ip, e.src_port, e.dst_ip, e.dst_port, e.observation_domain_id,
+        e.first_sequence, e.last_sequence, e.records, e.gaps, e.duplicate_or_reordered
+      ]));
+      const rows = filtered.map(e => `<tr>
         <td><code>${esc(e.exporter_key)}</code></td>
         <td>${esc(e.records)}</td>
         <td class="${statusClass(e)}">${esc(e.gaps)}</td>
@@ -576,7 +586,7 @@ INDEX_HTML = """<!doctype html>
         <td>${esc(formatNsTime(e.last_seen_ns))}</td>
         <td>${esc(formatNsAge(e.last_seen_ns))}</td>
       </tr>`);
-      document.getElementById('exportersTable').innerHTML = table(['Exporter', 'Records', 'Gaps', 'Dup/Reorder', 'Sequence', 'First Seen', 'Last Seen', 'Idle'], rows);
+      document.getElementById('exportersTable').innerHTML = filterStatus(state.exporterFilter, filtered.length, state.exporters.length) + table(['Exporter', 'Records', 'Gaps', 'Dup/Reorder', 'Sequence', 'First Seen', 'Last Seen', 'Idle'], rows);
     }
     function renderFlows() {
       const filtered = state.flows.filter(f => rowMatches(f, state.flowFilter, [
@@ -1607,6 +1617,10 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('refreshData').addEventListener('click', () => loadAll().catch(err => {
       document.getElementById('pcapStatus').textContent = err.message || String(err);
     }));
+    document.getElementById('exporterFilter').addEventListener('input', event => {
+      state.exporterFilter = event.target.value;
+      renderExporters();
+    });
     document.getElementById('flowFilter').addEventListener('input', event => {
       state.flowFilter = event.target.value;
       renderFlows();
