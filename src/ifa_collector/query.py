@@ -446,6 +446,36 @@ class QueryStore:
             )
         )
 
+    def error_detail(self, error: str, limit: int = 20, import_id: int | None = None) -> dict[str, Any]:
+        import_filter = "AND import_id = ?" if import_id is not None else ""
+        params: tuple[Any, ...] = (error, import_id, limit) if import_id is not None else (error, limit)
+        samples = _rows_to_dicts(
+            self.conn.execute(
+                f"""
+                SELECT id, import_id, timestamp_ns, error, count
+                FROM parse_errors
+                WHERE error = ?
+                  {import_filter}
+                ORDER BY timestamp_ns DESC, id DESC
+                LIMIT ?
+                """,
+                params,
+            )
+        )
+        summary_params: tuple[Any, ...] = (error, import_id) if import_id is not None else (error,)
+        summary = self.conn.execute(
+            f"""
+            SELECT error, COUNT(*) AS occurrences, SUM(count) AS total_count,
+                   MIN(timestamp_ns) AS first_seen_ns, MAX(timestamp_ns) AS last_seen_ns
+            FROM parse_errors
+            WHERE error = ?
+              {import_filter}
+            GROUP BY error
+            """,
+            summary_params,
+        ).fetchone()
+        return {"summary": dict(summary) if summary else None, "samples": samples}
+
 
 def _rows_to_dicts(cursor: sqlite3.Cursor) -> list[dict[str, Any]]:
     return [dict(row) for row in cursor.fetchall()]

@@ -127,4 +127,9 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert store.paths(import_id=1)[0]["records"] == 1
     assert store.recent_records(import_id=1)[0]["import_id"] == 1
     assert store.errors(import_id=1)[0]["error"] == "bad packet"
+    error_detail = store.error_detail("bad packet", import_id=1)
+    assert error_detail["summary"]["occurrences"] == 1
+    assert error_detail["summary"]["total_count"] == 1
+    assert error_detail["samples"][0]["timestamp_ns"] == 11
+    assert store.error_detail("missing") == {"summary": None, "samples": []}
     store.close()

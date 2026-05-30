@@ -425,6 +425,7 @@ INDEX_HTML = """<!doctype html>
     <section id="errors">
       <div class="panel"><h2>Unresolved Hops</h2><div id="unresolvedTable"></div></div>
       <div class="panel"><h2>Parse Errors</h2><div id="errorsTable"></div></div>
+      <div class="panel"><h2>Parse Error Detail</h2><div id="errorDetail" class="detail">Select a parse error.</div></div>
     </section>
   </main>
   <script>
@@ -787,8 +788,36 @@ INDEX_HTML = """<!doctype html>
         <td class="path">${esc(h.resolved_traffic_path || '-')}</td>
       </tr>`);
       document.getElementById('unresolvedTable').innerHTML = table(['Record', 'Hop', 'Device ID', 'Logical Ports', 'Resolved Interfaces', 'Flow', 'Path'], unresolvedRows);
-      const rows = state.errors.map(e => `<tr><td>${esc(e.error)}</td><td>${esc(e.occurrences)}</td></tr>`);
-      document.getElementById('errorsTable').innerHTML = table(['Error', 'Occurrences'], rows);
+      const rows = state.errors.map(e => `<tr class="clickable" onclick="loadErrorDetail(${jsArg(e.error)})">
+        <td>${esc(e.error)}</td>
+        <td>${esc(e.occurrences)}</td>
+        <td>${esc(formatNsTime(e.first_seen_ns))}</td>
+        <td>${esc(formatNsTime(e.last_seen_ns))}</td>
+      </tr>`);
+      document.getElementById('errorsTable').innerHTML = table(['Error', 'Occurrences', 'First Seen', 'Last Seen'], rows);
+    }
+    async function loadErrorDetail(errorText) {
+      const importQuery = state.selectedImportId ? `&import_id=${encodeURIComponent(state.selectedImportId)}` : '';
+      const data = await api(`/api/error-detail?error=${encodeURIComponent(errorText)}&limit=20${importQuery}`);
+      if (!data.summary) {
+        document.getElementById('errorDetail').textContent = 'No matching parse errors.';
+        return;
+      }
+      const summary = data.summary;
+      const rows = (data.samples || []).map(item => `<tr>
+        <td>${esc(item.id)}</td>
+        <td>${esc(item.import_id || '-')}</td>
+        <td>${esc(formatNsTime(item.timestamp_ns))}</td>
+        <td>${esc(item.count || 0)}</td>
+      </tr>`);
+      document.getElementById('errorDetail').innerHTML = `<div class="kv">
+        <strong>Error</strong><code>${esc(summary.error)}</code>
+        <strong>Rows</strong><span>${esc(summary.occurrences || 0)}</span>
+        <strong>Total Count</strong><span>${esc(summary.total_count || 0)}</span>
+        <strong>First Seen</strong><span>${esc(formatNsTime(summary.first_seen_ns))}</span>
+        <strong>Last Seen</strong><span>${esc(formatNsTime(summary.last_seen_ns))}</span>
+      </div>
+      ${table(['Error Row', 'Import', 'Timestamp', 'Count'], rows)}`;
     }
     function renderTopology() {
       const topo = state.topology || { graph: { nodes: [], links: [] }, summary: {}, errors: [] };
@@ -1607,6 +1636,11 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/errors":
                     limit = _limit(parsed.query)
                     self._send_json({"errors": _query(db_path).errors(limit, _import_id(parsed.query))})
+                elif parsed.path == "/api/error-detail":
+                    params = parse_qs(parsed.query)
+                    error = unquote(params.get("error", [""])[0])
+                    limit = int(params.get("limit", ["20"])[0])
+                    self._send_json(_query(db_path).error_detail(error, limit, _import_id(parsed.query)))
                 elif parsed.path == "/api/topology":
                     topology = load_topology(topology_path)
                     inventory.update_from_topology(topology)
