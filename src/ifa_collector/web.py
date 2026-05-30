@@ -725,11 +725,18 @@ INDEX_HTML = """<!doctype html>
         <td>${esc(formatNsTime(item.imported_at_ns))}</td>
         <td><code>${esc(item.source || '-')}</code></td>
         <td>${esc(item.parsed_ifa_records || 0)}</td>
+        <td>${esc(item.db_records || 0)}</td>
+        <td>${esc(item.db_hops || 0)}</td>
+        <td>${esc(item.flows || 0)}</td>
+        <td>${esc(item.paths || 0)}</td>
+        <td>${esc(item.exporters || 0)}</td>
         <td class="${item.parse_errors ? 'bad' : ''}">${esc(item.parse_errors || 0)}</td>
+        <td>${esc(formatNsTime(item.first_seen_ns))}</td>
+        <td>${esc(formatNsTime(item.last_seen_ns))}</td>
         <td><button class="secondary" onclick="deleteImport(event, ${esc(item.id)})">Delete</button></td>
       </tr>`);
       const label = state.selectedImportId ? `Filtering by import #${state.selectedImportId}` : 'Showing all records';
-      document.getElementById('importsTable').innerHTML = `<div class="status">${esc(label)} ${state.selectedImportId ? '<button class="secondary" onclick="clearImportFilter()">Clear Import Filter</button>' : ''}</div>` + table(['Import', 'Imported At', 'Source', 'Records', 'Errors', 'Action'], rows);
+      document.getElementById('importsTable').innerHTML = `<div class="status">${esc(label)} ${state.selectedImportId ? '<button class="secondary" onclick="clearImportFilter()">Clear Import Filter</button>' : ''}</div>` + table(['Import', 'Imported At', 'Source', 'Parsed', 'DB Records', 'Hops', 'Flows', 'Paths', 'Exporters', 'Errors', 'First Seen', 'Last Seen', 'Action'], rows);
     }
     async function selectImport(importId) {
       state.selectedImportId = Number(importId);

@@ -420,9 +420,26 @@ class QueryStore:
         return _rows_to_dicts(
             self.conn.execute(
                 """
-                SELECT id, imported_at_ns, source, parsed_ifa_records, parse_errors
-                FROM import_runs
-                ORDER BY id DESC
+                SELECT
+                    ir.id,
+                    ir.imported_at_ns,
+                    ir.source,
+                    ir.parsed_ifa_records,
+                    ir.parse_errors,
+                    (SELECT COUNT(*) FROM ifa_records WHERE import_id = ir.id) AS db_records,
+                    (
+                        SELECT COUNT(*)
+                        FROM hops AS h
+                        JOIN ifa_records AS r ON r.id = h.record_id
+                        WHERE r.import_id = ir.id
+                    ) AS db_hops,
+                    (SELECT COUNT(DISTINCT flow_key) FROM ifa_records WHERE import_id = ir.id AND flow_key IS NOT NULL) AS flows,
+                    (SELECT COUNT(DISTINCT resolved_traffic_path) FROM ifa_records WHERE import_id = ir.id) AS paths,
+                    (SELECT COUNT(DISTINCT exporter_key) FROM ifa_records WHERE import_id = ir.id AND exporter_key IS NOT NULL) AS exporters,
+                    (SELECT MIN(timestamp_ns) FROM ifa_records WHERE import_id = ir.id) AS first_seen_ns,
+                    (SELECT MAX(timestamp_ns) FROM ifa_records WHERE import_id = ir.id) AS last_seen_ns
+                FROM import_runs AS ir
+                ORDER BY ir.id DESC
                 LIMIT ?
                 """,
                 (limit,),

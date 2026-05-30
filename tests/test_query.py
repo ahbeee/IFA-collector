@@ -123,6 +123,13 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert import_one["source"] == "sample.pcap"
     assert import_one["parsed_ifa_records"] == 2
     assert import_one["parse_errors"] == 1
+    assert import_one["db_records"] == 1
+    assert import_one["db_hops"] == 2
+    assert import_one["flows"] == 1
+    assert import_one["paths"] == 1
+    assert import_one["exporters"] == 1
+    assert import_one["first_seen_ns"] == 10
+    assert import_one["last_seen_ns"] == 10
     assert store.flows(import_id=1)[0]["records"] == 1
     assert store.paths(import_id=1)[0]["records"] == 1
     assert store.recent_records(import_id=1)[0]["import_id"] == 1
