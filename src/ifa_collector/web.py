@@ -1372,7 +1372,8 @@ INDEX_HTML = """<!doctype html>
       if (description === 'delete enterprise-id') delete state.tamSpec.delete.enterprise_id;
     }
     async function loadFlow(flowKey) {
-      const data = await api('/api/flow-detail?flow_key=' + encodeURIComponent(flowKey) + '&limit=3');
+      const importQuery = state.selectedImportId ? `&import_id=${encodeURIComponent(state.selectedImportId)}` : '';
+      const data = await api('/api/flow-detail?flow_key=' + encodeURIComponent(flowKey) + '&limit=3' + importQuery);
       const flow = data.flow;
       const records = data.sample_records.map(r => `<div>
         <p><span class="pill">seq ${esc(r.sequence_number)}</span> <code>${esc(r.resolved_traffic_path)}</code></p>
@@ -1525,7 +1526,7 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     params = parse_qs(parsed.query)
                     flow_key = unquote(params.get("flow_key", [""])[0])
                     limit = int(params.get("limit", ["10"])[0])
-                    self._send_json(_query(db_path).flow_detail(flow_key, limit))
+                    self._send_json(_query(db_path).flow_detail(flow_key, limit, _import_id(parsed.query)))
                 elif parsed.path == "/api/path-detail":
                     params = parse_qs(parsed.query)
                     path = unquote(params.get("path", [""])[0])

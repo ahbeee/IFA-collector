@@ -149,22 +149,40 @@ class QueryStore:
             )
         )
 
-    def flow_detail(self, flow_key: str, limit: int = 10) -> dict[str, Any]:
-        flow = self.conn.execute(
-            """
-            SELECT flow_key, src_ip, dst_ip, protocol, src_port, dst_port, tunnel_vni,
-                   records, first_seen_ns, last_seen_ns
-            FROM flows
-            WHERE flow_key = ?
-            """,
-            (flow_key,),
-        ).fetchone()
+    def flow_detail(self, flow_key: str, limit: int = 10, import_id: int | None = None) -> dict[str, Any]:
+        if import_id is not None:
+            flow = self.conn.execute(
+                """
+                SELECT
+                    r.flow_key, f.src_ip, f.dst_ip, f.protocol, f.src_port, f.dst_port, f.tunnel_vni,
+                    COUNT(*) AS records,
+                    MIN(r.timestamp_ns) AS first_seen_ns,
+                    MAX(r.timestamp_ns) AS last_seen_ns
+                FROM ifa_records AS r
+                LEFT JOIN flows AS f ON f.flow_key = r.flow_key
+                WHERE r.flow_key = ? AND r.import_id = ?
+                GROUP BY r.flow_key, f.src_ip, f.dst_ip, f.protocol, f.src_port, f.dst_port, f.tunnel_vni
+                """,
+                (flow_key, import_id),
+            ).fetchone()
+        else:
+            flow = self.conn.execute(
+                """
+                SELECT flow_key, src_ip, dst_ip, protocol, src_port, dst_port, tunnel_vni,
+                       records, first_seen_ns, last_seen_ns
+                FROM flows
+                WHERE flow_key = ?
+                """,
+                (flow_key,),
+            ).fetchone()
         if flow is None:
             raise ValueError(f"flow not found: {flow_key}")
 
+        import_filter = "AND import_id = ?" if import_id is not None else ""
+        flow_params: tuple[Any, ...] = (flow_key, import_id) if import_id is not None else (flow_key,)
         paths = _rows_to_dicts(
             self.conn.execute(
-                """
+                f"""
                 SELECT
                     resolved_traffic_path, traffic_path, metadata_path,
                     COUNT(*) AS records,
@@ -172,23 +190,25 @@ class QueryStore:
                     MAX(hop_count) AS max_hops
                 FROM ifa_records
                 WHERE flow_key = ?
+                {import_filter}
                 GROUP BY resolved_traffic_path, traffic_path, metadata_path
                 ORDER BY records DESC
                 """,
-                (flow_key,),
+                flow_params,
             )
         )
 
         records = []
         for record in self.conn.execute(
-            """
+            f"""
             SELECT id, timestamp_ns, exporter_key, sequence_number, traffic_path, resolved_traffic_path
             FROM ifa_records
             WHERE flow_key = ?
+            {import_filter}
             ORDER BY id
             LIMIT ?
             """,
-            (flow_key, limit),
+            (*flow_params, limit),
         ):
             hops = _rows_to_dicts(
                 self.conn.execute(
