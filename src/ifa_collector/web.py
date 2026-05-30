@@ -269,6 +269,7 @@ INDEX_HTML = """<!doctype html>
         <div class="metric"><div class="label">Flows</div><div class="value" id="mFlows">-</div></div>
         <div class="metric"><div class="label">Sequence Gaps</div><div class="value" id="mGaps">-</div></div>
         <div class="metric"><div class="label">Unresolved Hops</div><div class="value" id="mUnresolved">-</div></div>
+        <div class="metric"><div class="label">Exporter Alerts</div><div class="value" id="mExporterAlerts">-</div></div>
       </div>
       <div class="panel">
         <h2>PCAP Import</h2>
@@ -566,6 +567,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('mFlows').textContent = state.flows.length;
       document.getElementById('mGaps').textContent = state.exporters.reduce((a, e) => a + (e.gaps || 0), 0);
       document.getElementById('mUnresolved').textContent = unresolvedTotal(state.resolution);
+      document.getElementById('mExporterAlerts').textContent = state.exporters.filter(e => exporterHealth(e).level).length;
       renderExporters();
       renderFlows();
       renderPaths();
@@ -584,6 +586,7 @@ INDEX_HTML = """<!doctype html>
       ]));
       const rows = filtered.map(e => `<tr>
         <td><code>${esc(e.exporter_key)}</code></td>
+        <td class="${exporterHealth(e).level}">${esc(exporterHealth(e).label)}</td>
         <td>${esc(e.records)}</td>
         <td class="${statusClass(e)}">${esc(e.gaps)}</td>
         <td class="${statusClass(e)}">${esc(e.duplicate_or_reordered)}</td>
@@ -592,7 +595,15 @@ INDEX_HTML = """<!doctype html>
         <td>${esc(formatNsTime(e.last_seen_ns))}</td>
         <td>${esc(formatNsAge(e.last_seen_ns))}</td>
       </tr>`);
-      document.getElementById('exportersTable').innerHTML = filterStatus(state.exporterFilter, filtered.length, state.exporters.length) + table(['Exporter', 'Records', 'Gaps', 'Dup/Reorder', 'Sequence', 'First Seen', 'Last Seen', 'Idle'], rows);
+      document.getElementById('exportersTable').innerHTML = filterStatus(state.exporterFilter, filtered.length, state.exporters.length) + table(['Exporter', 'Health', 'Records', 'Gaps', 'Dup/Reorder', 'Sequence', 'First Seen', 'Last Seen', 'Idle'], rows);
+    }
+    function exporterHealth(row) {
+      if (row.gaps || row.duplicate_or_reordered) return {level: 'bad', label: 'Sequence'};
+      if (state.collector?.running && row.last_seen_ns) {
+        const idleSeconds = Math.max(0, (Date.now() * 1e6 - Number(row.last_seen_ns)) / 1e9);
+        if (idleSeconds > 60) return {level: 'warn', label: 'Stale'};
+      }
+      return {level: '', label: 'OK'};
     }
     function renderFlows() {
       const filtered = state.flows.filter(f => rowMatches(f, state.flowFilter, [
