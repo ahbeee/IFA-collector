@@ -56,6 +56,9 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert exporter_one["records"] == 1
     assert exporter_one["first_sequence"] == 1
     assert exporter_one["last_sequence"] == 1
+    assert exporter_one["first_seen_ns"] == 10
+    assert exporter_one["last_seen_ns"] == 10
+    assert store.exporters()[0]["first_seen_ns"] == 10
     flow = store.flows()[0]
     assert flow["flow_key"] == "flow"
     assert flow["paths"] == 2

@@ -554,8 +554,11 @@ INDEX_HTML = """<!doctype html>
         <td class="${statusClass(e)}">${esc(e.gaps)}</td>
         <td class="${statusClass(e)}">${esc(e.duplicate_or_reordered)}</td>
         <td>${esc(e.first_sequence)} - ${esc(e.last_sequence)}</td>
+        <td>${esc(formatNsTime(e.first_seen_ns))}</td>
+        <td>${esc(formatNsTime(e.last_seen_ns))}</td>
+        <td>${esc(formatNsAge(e.last_seen_ns))}</td>
       </tr>`);
-      document.getElementById('exportersTable').innerHTML = table(['Exporter', 'Records', 'Gaps', 'Dup/Reorder', 'Sequence'], rows);
+      document.getElementById('exportersTable').innerHTML = table(['Exporter', 'Records', 'Gaps', 'Dup/Reorder', 'Sequence', 'First Seen', 'Last Seen', 'Idle'], rows);
     }
     function renderFlows() {
       const rows = state.flows.map(f => `<tr class="clickable" onclick="loadFlow(${jsArg(f.flow_key)})">
@@ -721,6 +724,10 @@ INDEX_HTML = """<!doctype html>
     function formatNsTime(ns) {
       if (!ns) return '-';
       return new Date(Number(ns) / 1e6).toLocaleString();
+    }
+    function formatNsAge(ns) {
+      if (!ns) return '-';
+      return formatDuration((Date.now() * 1e6 - Number(ns)) / 1e9);
     }
     function formatDuration(seconds) {
       const value = Math.max(0, Math.floor(Number(seconds || 0)));

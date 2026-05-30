@@ -46,6 +46,7 @@ class QueryStore:
                             ELSE MAX(r.sequence_number) - MIN(r.sequence_number) + 1 - COUNT(DISTINCT r.sequence_number)
                         END AS gaps,
                         COUNT(r.sequence_number) - COUNT(DISTINCT r.sequence_number) AS duplicate_or_reordered,
+                        MIN(r.timestamp_ns) AS first_seen_ns,
                         MAX(r.timestamp_ns) AS last_seen_ns
                     FROM ifa_records AS r
                     LEFT JOIN exporters AS e ON e.exporter_key = r.exporter_key
@@ -60,10 +61,14 @@ class QueryStore:
             self.conn.execute(
                 """
                 SELECT
-                    exporter_key, src_ip, src_port, dst_ip, dst_port, observation_domain_id,
-                    first_sequence, last_sequence, records, gaps, duplicate_or_reordered, last_seen_ns
-                FROM exporters
-                ORDER BY records DESC
+                    e.exporter_key, e.src_ip, e.src_port, e.dst_ip, e.dst_port, e.observation_domain_id,
+                    e.first_sequence, e.last_sequence, e.records, e.gaps, e.duplicate_or_reordered,
+                    MIN(r.timestamp_ns) AS first_seen_ns,
+                    e.last_seen_ns
+                FROM exporters AS e
+                LEFT JOIN ifa_records AS r ON r.exporter_key = e.exporter_key
+                GROUP BY e.exporter_key
+                ORDER BY e.records DESC
                 """
             )
         )
