@@ -35,11 +35,20 @@ class RestconfClient:
     def patch_json(self, path: str, payload: dict) -> None:
         self._request("PATCH", path, payload)
 
+    def post_operation(self, path: str, payload: dict | None = None) -> dict:
+        body = self._request("POST", path, payload, prefix="/restconf/operations")
+        if not body.strip():
+            return {}
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"RESTCONF invalid JSON from {self._url(path, prefix='/restconf/operations')}") from exc
+
     def delete(self, path: str) -> None:
         self._request("DELETE", path)
 
-    def _request(self, method: str, path: str, payload: dict | None = None) -> str:
-        url = self._url(path)
+    def _request(self, method: str, path: str, payload: dict | None = None, prefix: str | None = None) -> str:
+        url = self._url(path, prefix=prefix)
         data = None
         headers = self._headers()
         if payload is not None:
@@ -55,11 +64,12 @@ class RestconfClient:
         except Exception as exc:
             raise RuntimeError(f"RESTCONF {method} failed for {url}: {exc}") from exc
 
-    def _url(self, path: str) -> str:
+    def _url(self, path: str, prefix: str | None = None) -> str:
         normalized = path.strip().lstrip("/")
         if normalized.startswith("http://") or normalized.startswith("https://"):
             return normalized
-        return f"https://{self.host}:{self.port}{self.path_prefix}/{normalized}"
+        path_prefix = "/" + prefix.strip().lstrip("/") if prefix else self.path_prefix
+        return f"https://{self.host}:{self.port}{path_prefix}/{normalized}"
 
     def _headers(self) -> dict[str, str]:
         token = base64.b64encode(f"{self.username}:{self.password}".encode("utf-8")).decode("ascii")

@@ -11,7 +11,7 @@ from .inventory import Inventory
 from .query import QueryStore
 from .schema import SchemaRegistry
 from .storage import SqliteStore
-from .tam import apply_tam_plan, preview_tam_plan, read_tam_devices
+from .tam import apply_tam_plan, clear_flowgroup_counters, preview_tam_plan, read_tam_devices
 from .topology import RestconfAuth, RestconfDevice, load_topology, scan_topology, scan_topology_devices, scan_topology_target_specs
 
 
@@ -822,9 +822,9 @@ INDEX_HTML = """<!doctype html>
       if (f.ethertype) parts.push(`ethertype=${f.ethertype}`);
       return parts.join(', ');
     }
-    function tableWithActions(kind, headers, rows) {
+    function tableWithActions(kind, headers, rows, extraControls = '') {
       const controls = rows.length
-        ? `<div class="table-actions"><button class="mini" data-delete-kind="${kind}">Queue Selected Deletes</button></div>`
+        ? `<div class="table-actions"><button class="mini" data-delete-kind="${kind}">Queue Selected Deletes</button>${extraControls}</div>`
         : '';
       return controls + table(['Delete', 'Edit', ...headers], rows);
     }
@@ -849,8 +849,12 @@ INDEX_HTML = """<!doctype html>
         tam.devices.flatMap(d => (d.collectors || []).map(c => `<tr><td><input type="checkbox" data-tam-delete="collectors" value="${esc(c.name)}"></td><td><button class="mini" data-tam-edit="collectors" data-tam-name="${esc(c.name)}">Edit</button></td><td>${esc(d.host)}</td><td>${esc(c.name)}</td><td>${esc(c.ip)}</td><td>${esc(c.port)}</td><td>${esc(c.protocol)}</td><td>${esc(c.vrf || '-')}</td></tr>`)));
       document.getElementById('tamSamplers').innerHTML = tableWithActions('samplers', ['Host', 'Name', 'Sampling Rate'],
         tam.devices.flatMap(d => (d.samplers || []).map(s => `<tr><td><input type="checkbox" data-tam-delete="samplers" value="${esc(s.name)}"></td><td><button class="mini" data-tam-edit="samplers" data-tam-name="${esc(s.name)}">Edit</button></td><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.sampling_rate)}</td></tr>`)));
-      document.getElementById('tamFlowgroups').innerHTML = tableWithActions('flowgroups', ['Host', 'Name', 'ID', 'Match', 'Packets', 'Bytes'],
-        tam.devices.flatMap(d => (d.flowgroups || []).map(f => `<tr><td><input type="checkbox" data-tam-delete="flowgroups" value="${esc(f.name)}"></td><td><button class="mini" data-tam-edit="flowgroups" data-tam-name="${esc(f.name)}">Edit</button></td><td>${esc(d.host)}</td><td>${esc(f.name)}</td><td>${esc(f.id)}</td><td><code>${esc(flowgroupMatch(f))}</code></td><td>${esc(f.packets)}</td><td>${esc(f.bytes)}</td></tr>`)));
+      document.getElementById('tamFlowgroups').innerHTML = tableWithActions(
+        'flowgroups',
+        ['Host', 'Name', 'ID', 'Match', 'Packets', 'Bytes'],
+        tam.devices.flatMap(d => (d.flowgroups || []).map(f => `<tr><td><input type="checkbox" data-tam-delete="flowgroups" value="${esc(f.name)}"></td><td><button class="mini" data-tam-edit="flowgroups" data-tam-name="${esc(f.name)}">Edit</button></td><td>${esc(d.host)}</td><td>${esc(f.name)}</td><td>${esc(f.id)}</td><td><code>${esc(flowgroupMatch(f))}</code></td><td>${esc(f.packets)}</td><td>${esc(f.bytes)}</td></tr>`)),
+        '<button class="mini" data-clear-fg-counters="selected">Clear Selected Counters</button><button class="mini" data-clear-fg-counters="all">Clear All Counters</button>'
+      );
       document.getElementById('tamSessions').innerHTML = tableWithActions('sessions', ['Host', 'Name', 'Flow Group', 'Node Type', 'Collector', 'Sampler'],
         tam.devices.flatMap(d => (d.ifa_sessions || []).map(s => `<tr><td><input type="checkbox" data-tam-delete="sessions" value="${esc(s.name)}"></td><td><button class="mini" data-tam-edit="sessions" data-tam-name="${esc(s.name)}">Edit</button></td><td>${esc(d.host)}</td><td>${esc(s.name)}</td><td>${esc(s.flowgroup)}</td><td>${esc(s.node_type)}</td><td>${esc(s.collector || '-')}</td><td>${esc(s.sampler || '-')}</td></tr>`)));
       document.querySelectorAll('button[data-delete-kind]').forEach(button => {
@@ -858,6 +862,11 @@ INDEX_HTML = """<!doctype html>
       });
       document.querySelectorAll('button[data-tam-edit]').forEach(button => {
         button.addEventListener('click', () => populateTamEdit(button.dataset.tamEdit, button.dataset.tamName));
+      });
+      document.querySelectorAll('button[data-clear-fg-counters]').forEach(button => {
+        button.addEventListener('click', () => clearFlowgroupCounters(button.dataset.clearFgCounters).catch(err => {
+          document.getElementById('tamPlan').textContent = err.message || String(err);
+        }));
       });
       renderTamForms();
       renderPendingTamSpec();
@@ -1106,6 +1115,32 @@ INDEX_HTML = """<!doctype html>
         document.getElementById('tamPlan').textContent = `Apply finished: ${result.summary?.requests || 0} request(s), ${result.summary?.errors || 0} error(s). TAM state refreshed.`;
       }
     }
+    async function clearFlowgroupCounters(mode) {
+      const devices = selectedDeviceSpecs();
+      if (!devices.length) {
+        document.getElementById('tamPlan').textContent = 'Select one TAM device before clearing counters.';
+        return;
+      }
+      const names = mode === 'all'
+        ? ['all']
+        : [...document.querySelectorAll('input[data-tam-delete="flowgroups"]:checked')].map(input => input.value);
+      if (!names.length) {
+        document.getElementById('tamPlan').textContent = 'Select flow group rows before clearing counters.';
+        return;
+      }
+      const result = await api('/api/tam/flowgroup-counters/clear', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({devices, names})
+      });
+      document.getElementById('tamPlan').textContent = `Clear counters finished: ${result.summary?.requests || 0} request(s), ${result.summary?.errors || 0} error(s).`;
+      if ((result.summary?.errors || 0) === 0) {
+        await readTam();
+        document.getElementById('tamPlan').textContent = `Clear counters finished: ${result.summary?.requests || 0} request(s), ${result.summary?.errors || 0} error(s). TAM state refreshed.`;
+      } else {
+        document.getElementById('tamPlan').textContent = JSON.stringify(result, null, 2);
+      }
+    }
     function clearSuccessfulTamTasks() {
       state.tamTasks.filter(task => task.status === 'ok').forEach(task => removeTaskFromSpec(task.description));
       state.tamTasks = state.tamTasks.filter(task => task.status !== 'ok');
@@ -1322,6 +1357,13 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/tam/apply":
                     body = self._read_json()
                     self._send_json(apply_tam_plan(_web_device_specs(body), _spec(body)))
+                elif parsed.path == "/api/tam/flowgroup-counters/clear":
+                    body = self._read_json()
+                    names = body.get("names", [])
+                    if not isinstance(names, list):
+                        self.send_error(HTTPStatus.BAD_REQUEST, "names must be a list")
+                        return
+                    self._send_json(clear_flowgroup_counters(_web_device_specs(body), [str(name) for name in names]))
                 elif parsed.path == "/api/pcap/ingest":
                     body = self._read_json()
                     path = Path(str(body.get("path", ""))).expanduser()

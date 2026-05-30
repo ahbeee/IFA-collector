@@ -79,6 +79,37 @@ def apply_tam_plan(devices: list[RestconfDevice], spec: dict[str, Any]) -> dict[
     return {"plan": plan, "results": results, "summary": {"requests": len(results), "errors": len(errors)}}
 
 
+def clear_flowgroup_counters(devices: list[RestconfDevice], names: list[str]) -> dict[str, Any]:
+    targets = [str(name).strip() for name in names if str(name).strip()]
+    if not targets:
+        raise ValueError("flowgroup counter target is required")
+    results = []
+    for device in devices:
+        client = RestconfClient(
+            host=device.host,
+            username=device.auth.username,
+            password=device.auth.password,
+            port=device.auth.port,
+            path_prefix=device.auth.path_prefix,
+            verify_tls=device.auth.verify_tls,
+            timeout=device.auth.timeout,
+        )
+        for name in targets:
+            item = {"host": device.host, "name": name, "description": f"clear flowgroup counters {name}"}
+            try:
+                item["output"] = client.post_operation(
+                    "openconfig-tam:clear-flowgroup-counters",
+                    {"openconfig-tam:input": {"name": name}},
+                )
+                item["status"] = "ok"
+            except Exception as exc:
+                item["status"] = "error"
+                item["error"] = str(exc)
+            results.append(item)
+    errors = [item for item in results if item.get("status") == "error"]
+    return {"results": results, "summary": {"requests": len(results), "errors": len(errors)}}
+
+
 def _normalize_device(host: str, payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
     switch_state = _state(payloads["switch"].get("openconfig-tam:switch", {}))
     return {
