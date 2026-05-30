@@ -214,6 +214,35 @@ class QueryStore:
 
         return {"path": dict(path), "sample_record": sample_record}
 
+    def recent_records(self, limit: int = 20) -> list[dict[str, Any]]:
+        records = []
+        for record in self.conn.execute(
+            """
+            SELECT id, timestamp_ns, exporter_key, sequence_number, flow_key, hop_count,
+                   traffic_path, resolved_traffic_path
+            FROM ifa_records
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ):
+            item = dict(record)
+            item["hops"] = _rows_to_dicts(
+                self.conn.execute(
+                    """
+                    SELECT traffic_index, device_id, device_name,
+                           ingress_logical_port, ingress_interface,
+                           egress_logical_port, egress_interface, ttl
+                    FROM hops
+                    WHERE record_id = ?
+                    ORDER BY traffic_index
+                    """,
+                    (record["id"],),
+                )
+            )
+            records.append(item)
+        return records
+
     def errors(self, limit: int = 20) -> list[dict[str, Any]]:
         return _rows_to_dicts(
             self.conn.execute(

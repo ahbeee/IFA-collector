@@ -35,6 +35,7 @@ class CollectorState:
     running: bool = False
     host: str = "0.0.0.0"
     port: int | None = None
+    started_at: float | None = None
     packets: int = 0
     parsed_ifa_records: int = 0
     parse_errors: int = 0
@@ -43,10 +44,16 @@ class CollectorState:
     last_peer: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
+        now = time.time()
+        uptime = (now - self.started_at) if self.started_at else 0.0
         return {
             "running": self.running,
             "host": self.host,
             "port": self.port,
+            "started_at": self.started_at,
+            "uptime_seconds": uptime,
+            "packets_per_second": (self.packets / uptime) if uptime > 0 else 0,
+            "records_per_second": (self.parsed_ifa_records / uptime) if uptime > 0 else 0,
             "packets": self.packets,
             "parsed_ifa_records": self.parsed_ifa_records,
             "parse_errors": self.parse_errors,
@@ -141,7 +148,7 @@ class UdpIngestCollector:
             if self._thread and self._thread.is_alive():
                 raise ValueError("collector is already running")
             self._stop.clear()
-            self.state = CollectorState(running=True, host=host, port=port)
+            self.state = CollectorState(running=True, host=host, port=port, started_at=time.time())
             self._thread = threading.Thread(target=self._run, name="ifa-udp-collector", daemon=True)
             self._thread.start()
             return self.state.as_dict()

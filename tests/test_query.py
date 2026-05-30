@@ -73,4 +73,8 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert detail["path"]["records"] == 1
     assert detail["sample_record"]["flow_key"] == "flow"
     assert [hop["device_id"] for hop in detail["sample_record"]["hops"]] == [1001, 1002]
+    recent = store.recent_records()
+    assert recent[0]["id"] == 1
+    assert recent[0]["resolved_traffic_path"] == "A -> B"
+    assert [hop["device_id"] for hop in recent[0]["hops"]] == [1001, 1002]
     store.close()

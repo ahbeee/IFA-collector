@@ -291,6 +291,7 @@ INDEX_HTML = """<!doctype html>
         </div>
         <div id="collectorStatus" class="status">Collector status not loaded.</div>
       </div>
+      <div class="panel"><h2>Recent IFA Records</h2><div id="recentRecordsTable"></div></div>
       <div class="panel"><h2>Exporters</h2><div id="exportersTable"></div></div>
     </section>
 
@@ -426,7 +427,7 @@ INDEX_HTML = """<!doctype html>
   </main>
   <script>
     const state = {
-      exporters: [], flows: [], paths: [], errors: [], unresolved: [], topology: null, tam: null,
+      exporters: [], flows: [], paths: [], recentRecords: [], errors: [], unresolved: [], topology: null, tam: null,
       resolution: null,
       devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
       collector: null, selectedTopologyNode: null, selectedPath: null, selectedPathDetail: null
@@ -511,12 +512,13 @@ INDEX_HTML = """<!doctype html>
       return epochSeconds ? new Date(epochSeconds * 1000).toLocaleString() : '-';
     }
     async function loadAll() {
-      const [exporters, flows, paths, errors, unresolved, topology, collector, resolution] = await Promise.all([
-        api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/errors'), api('/api/unresolved-hops?limit=100'), api('/api/topology'), api('/api/collector/status'), api('/api/resolution')
+      const [exporters, flows, paths, recentRecords, errors, unresolved, topology, collector, resolution] = await Promise.all([
+        api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/recent-records?limit=10'), api('/api/errors'), api('/api/unresolved-hops?limit=100'), api('/api/topology'), api('/api/collector/status'), api('/api/resolution')
       ]);
       state.exporters = exporters.exporters;
       state.flows = flows.flows;
       state.paths = paths.paths;
+      state.recentRecords = recentRecords.records;
       state.errors = errors.errors;
       state.unresolved = unresolved.unresolved_hops;
       state.topology = topology;
@@ -535,6 +537,7 @@ INDEX_HTML = """<!doctype html>
       renderTopology();
       renderTam();
       renderErrors();
+      renderRecentRecords();
       renderCollector();
     }
     function renderExporters() {
@@ -608,8 +611,11 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('collectorStatus').innerHTML = `<div class="kv">
         <strong>Status</strong><span class="${c.running ? '' : 'warn'}">${c.running ? 'Running' : 'Stopped'}</span>
         <strong>Listen</strong><code>${esc(c.host || '-')} : ${esc(c.port || '-')}</code>
+        <strong>Uptime</strong><span>${esc(formatDuration(c.uptime_seconds || 0))}</span>
         <strong>Packets</strong><span>${esc(c.packets || 0)}</span>
         <strong>Parsed IFA Records</strong><span>${esc(c.parsed_ifa_records || 0)}</span>
+        <strong>Packets/s</strong><span>${esc(formatRate(c.packets_per_second || 0))}</span>
+        <strong>Records/s</strong><span>${esc(formatRate(c.records_per_second || 0))}</span>
         <strong>Parse Errors</strong><span class="${c.parse_errors ? 'bad' : ''}">${esc(c.parse_errors || 0)}</span>
         <strong>Last Packet</strong><span>${esc(formatTime(c.last_packet_time))}</span>
         <strong>Last Peer</strong><span>${esc(c.last_peer || '-')}</span>
@@ -617,6 +623,31 @@ INDEX_HTML = """<!doctype html>
         <strong>Inventory Switches</strong><span class="${c.inventory?.devices ? '' : 'warn'}">${esc(c.inventory?.devices || 0)}</span>
         <strong>Inventory Ports</strong><span class="${c.inventory?.logical_ports ? '' : 'warn'}">${esc(c.inventory?.logical_ports || 0)}</span>
       </div>`;
+    }
+    function renderRecentRecords() {
+      const rows = state.recentRecords.map(r => {
+        const hops = (r.hops || []).map(h => `${hopDeviceDisplay(h)}(${h.ingress_interface || h.ingress_logical_port || '-'}->${h.egress_interface || h.egress_logical_port || '-'})`).join(' -> ');
+        return `<tr>
+          <td>${esc(r.id)}</td>
+          <td>${esc(r.sequence_number ?? '-')}</td>
+          <td><code>${esc(r.flow_key || '-')}</code></td>
+          <td class="path">${esc(r.resolved_traffic_path || '-')}</td>
+          <td class="path">${esc(hops || '-')}</td>
+        </tr>`;
+      });
+      document.getElementById('recentRecordsTable').innerHTML = table(['Record', 'Seq', 'Flow', 'Path', 'Hops'], rows);
+    }
+    function formatRate(value) {
+      return Number(value || 0).toFixed(2);
+    }
+    function formatDuration(seconds) {
+      const value = Math.max(0, Math.floor(Number(seconds || 0)));
+      const h = Math.floor(value / 3600);
+      const m = Math.floor((value % 3600) / 60);
+      const s = value % 60;
+      if (h) return `${h}h ${m}m ${s}s`;
+      if (m) return `${m}m ${s}s`;
+      return `${s}s`;
     }
     function renderErrors() {
       const unresolvedRows = state.unresolved.map(h => `<tr>
@@ -1399,6 +1430,9 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/paths":
                     limit = _limit(parsed.query)
                     self._send_json({"paths": _query(db_path).paths(limit)})
+                elif parsed.path == "/api/recent-records":
+                    limit = _limit(parsed.query)
+                    self._send_json({"records": _query(db_path).recent_records(limit)})
                 elif parsed.path == "/api/resolution":
                     self._send_json(_query(db_path).resolution_summary())
                 elif parsed.path == "/api/unresolved-hops":
