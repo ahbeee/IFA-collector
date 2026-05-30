@@ -431,7 +431,7 @@ INDEX_HTML = """<!doctype html>
       exporters: [], flows: [], paths: [], recentRecords: [], imports: [], errors: [], unresolved: [], topology: null, tam: null,
       resolution: null,
       devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
-      collector: null, selectedTopologyNode: null, selectedPath: null, selectedPathDetail: null
+      collector: null, selectedTopologyNode: null, selectedPath: null, selectedPathDetail: null, selectedImportId: null
     };
 
     async function api(path, options) {
@@ -513,8 +513,9 @@ INDEX_HTML = """<!doctype html>
       return epochSeconds ? new Date(epochSeconds * 1000).toLocaleString() : '-';
     }
     async function loadAll() {
+      const importQuery = state.selectedImportId ? `&import_id=${encodeURIComponent(state.selectedImportId)}` : '';
       const [exporters, flows, paths, recentRecords, imports, errors, unresolved, topology, collector, resolution] = await Promise.all([
-        api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/recent-records?limit=10'), api('/api/imports?limit=10'), api('/api/errors'), api('/api/unresolved-hops?limit=100'), api('/api/topology'), api('/api/collector/status'), api('/api/resolution')
+        api('/api/exporters'), api(`/api/flows?limit=100${importQuery}`), api(`/api/paths?limit=100${importQuery}`), api(`/api/recent-records?limit=10${importQuery}`), api('/api/imports?limit=10'), api(`/api/errors?limit=100${importQuery}`), api(`/api/unresolved-hops?limit=100${importQuery}`), api('/api/topology'), api('/api/collector/status'), api('/api/resolution')
       ]);
       state.exporters = exporters.exporters;
       state.flows = flows.flows;
@@ -584,7 +585,8 @@ INDEX_HTML = """<!doctype html>
       try {
         const row = state.paths.find(p => p.resolved_traffic_path === pathText) || {};
         state.selectedPath = pathText;
-        state.selectedPathDetail = await api(`/api/path-detail?path=${encodeURIComponent(pathText)}`);
+        const importQuery = state.selectedImportId ? `&import_id=${encodeURIComponent(state.selectedImportId)}` : '';
+        state.selectedPathDetail = await api(`/api/path-detail?path=${encodeURIComponent(pathText)}${importQuery}`);
         const nodes = selectedTopologyPathNodes();
         const hops = selectedPathHops();
         const hopRows = hops.map(h => `<tr>
@@ -641,14 +643,25 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('recentRecordsTable').innerHTML = table(['Record', 'Seq', 'Flow', 'Path', 'Hops'], rows);
     }
     function renderImports() {
-      const rows = state.imports.map(item => `<tr>
+      const rows = state.imports.map(item => `<tr class="clickable ${state.selectedImportId === item.id ? 'selected-row' : ''}" onclick="selectImport(${esc(item.id)})">
         <td>${esc(item.id)}</td>
         <td>${esc(formatNsTime(item.imported_at_ns))}</td>
         <td><code>${esc(item.source || '-')}</code></td>
         <td>${esc(item.parsed_ifa_records || 0)}</td>
         <td class="${item.parse_errors ? 'bad' : ''}">${esc(item.parse_errors || 0)}</td>
       </tr>`);
-      document.getElementById('importsTable').innerHTML = table(['Import', 'Imported At', 'Source', 'Records', 'Errors'], rows);
+      const label = state.selectedImportId ? `Filtering by import #${state.selectedImportId}` : 'Showing all records';
+      document.getElementById('importsTable').innerHTML = `<div class="status">${esc(label)} ${state.selectedImportId ? '<button class="secondary" onclick="clearImportFilter()">Clear Import Filter</button>' : ''}</div>` + table(['Import', 'Imported At', 'Source', 'Records', 'Errors'], rows);
+    }
+    async function selectImport(importId) {
+      state.selectedImportId = Number(importId);
+      state.selectedPath = null;
+      state.selectedPathDetail = null;
+      await loadAll();
+    }
+    async function clearImportFilter() {
+      state.selectedImportId = null;
+      await loadAll();
     }
     function formatRate(value) {
       return Number(value || 0).toFixed(2);
@@ -1444,13 +1457,13 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     self._send_json({"exporters": _query(db_path).exporters()})
                 elif parsed.path == "/api/flows":
                     limit = _limit(parsed.query)
-                    self._send_json({"flows": _query(db_path).flows(limit)})
+                    self._send_json({"flows": _query(db_path).flows(limit, _import_id(parsed.query))})
                 elif parsed.path == "/api/paths":
                     limit = _limit(parsed.query)
-                    self._send_json({"paths": _query(db_path).paths(limit)})
+                    self._send_json({"paths": _query(db_path).paths(limit, _import_id(parsed.query))})
                 elif parsed.path == "/api/recent-records":
                     limit = _limit(parsed.query)
-                    self._send_json({"records": _query(db_path).recent_records(limit)})
+                    self._send_json({"records": _query(db_path).recent_records(limit, _import_id(parsed.query))})
                 elif parsed.path == "/api/imports":
                     limit = _limit(parsed.query)
                     self._send_json({"imports": _query(db_path).import_runs(limit)})
@@ -1458,10 +1471,10 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     self._send_json(_query(db_path).resolution_summary())
                 elif parsed.path == "/api/unresolved-hops":
                     limit = _limit(parsed.query)
-                    self._send_json({"unresolved_hops": _query(db_path).unresolved_hops(limit)})
+                    self._send_json({"unresolved_hops": _query(db_path).unresolved_hops(limit, _import_id(parsed.query))})
                 elif parsed.path == "/api/errors":
                     limit = _limit(parsed.query)
-                    self._send_json({"errors": _query(db_path).errors(limit)})
+                    self._send_json({"errors": _query(db_path).errors(limit, _import_id(parsed.query))})
                 elif parsed.path == "/api/topology":
                     topology = load_topology(topology_path)
                     inventory.update_from_topology(topology)
@@ -1476,7 +1489,7 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/path-detail":
                     params = parse_qs(parsed.query)
                     path = unquote(params.get("path", [""])[0])
-                    self._send_json(_query(db_path).path_detail(path))
+                    self._send_json(_query(db_path).path_detail(path, _import_id(parsed.query)))
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             except ValueError as exc:
@@ -1639,6 +1652,11 @@ def _runtime_row_count(db_path: Path) -> int:
 def _limit(query: str) -> int:
     params = parse_qs(query)
     return int(params.get("limit", ["100"])[0])
+
+
+def _import_id(query: str) -> int | None:
+    value = parse_qs(query).get("import_id", [""])[0]
+    return int(value) if value else None
 
 
 def _web_device_specs(body: dict[str, object]) -> list[RestconfDevice]:

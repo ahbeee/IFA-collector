@@ -19,7 +19,7 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
             dst_port INTEGER, tunnel_vni INTEGER, records INTEGER, first_seen_ns INTEGER, last_seen_ns INTEGER
         );
         CREATE TABLE ifa_records (
-            id INTEGER PRIMARY KEY, timestamp_ns INTEGER, exporter_key TEXT, sequence_number INTEGER,
+            id INTEGER PRIMARY KEY, import_id INTEGER, timestamp_ns INTEGER, exporter_key TEXT, sequence_number INTEGER,
             observation_domain_id INTEGER, set_id INTEGER, flow_key TEXT, metadata_path TEXT,
             traffic_path TEXT, resolved_traffic_path TEXT, hop_count INTEGER, raw_metadata_hex TEXT,
             clipped_packet_hex TEXT
@@ -30,14 +30,15 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
             ingress_interface TEXT, egress_logical_port INTEGER, egress_interface TEXT, ttl INTEGER,
             raw_hex TEXT, fields_json TEXT
         );
-        CREATE TABLE parse_errors (id INTEGER PRIMARY KEY, timestamp_ns INTEGER, error TEXT, count INTEGER);
+        CREATE TABLE parse_errors (id INTEGER PRIMARY KEY, import_id INTEGER, timestamp_ns INTEGER, error TEXT, count INTEGER);
         CREATE TABLE import_runs (
             id INTEGER PRIMARY KEY, imported_at_ns INTEGER, source TEXT,
             parsed_ifa_records INTEGER, parse_errors INTEGER
         );
         INSERT INTO exporters VALUES ('exp', '10.0.0.1', 9070, '192.0.2.1', 9090, 1, 1, 2, 2, 0, 0, 20);
         INSERT INTO flows VALUES ('flow', '1.1.1.1', '4.4.4.4', 17, 1, 2, NULL, 1, 10, 20);
-        INSERT INTO ifa_records VALUES (1, 10, 'exp', 1, 1, 257, 'flow', '2 -> 1', '1 -> 2', 'A -> B', 2, '', '');
+        INSERT INTO ifa_records VALUES (1, 1, 10, 'exp', 1, 1, 257, 'flow', '2 -> 1', '1 -> 2', 'A -> B', 2, '', '');
+        INSERT INTO parse_errors VALUES (1, 1, 11, 'bad packet', 1);
         INSERT INTO hops VALUES (1, 1, 0, 0, 1001, 'A', 'model', 3, 'Ethernet0', 79, 'Ethernet48', 63, '', '{}');
         INSERT INTO hops VALUES (2, 1, 1, 1, 1002, NULL, NULL, 3, NULL, 79, NULL, 62, '', '{}');
         INSERT INTO import_runs VALUES (1, 123000000000, 'sample.pcap', 2, 1);
@@ -86,4 +87,8 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert imports[0]["source"] == "sample.pcap"
     assert imports[0]["parsed_ifa_records"] == 2
     assert imports[0]["parse_errors"] == 1
+    assert store.flows(import_id=1)[0]["records"] == 1
+    assert store.paths(import_id=1)[0]["records"] == 1
+    assert store.recent_records(import_id=1)[0]["import_id"] == 1
+    assert store.errors(import_id=1)[0]["error"] == "bad packet"
     store.close()

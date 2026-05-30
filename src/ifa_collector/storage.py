@@ -52,6 +52,7 @@ class SqliteStore:
 
             CREATE TABLE IF NOT EXISTS ifa_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                import_id INTEGER,
                 timestamp_ns INTEGER,
                 exporter_key TEXT,
                 sequence_number INTEGER,
@@ -64,6 +65,7 @@ class SqliteStore:
                 hop_count INTEGER,
                 raw_metadata_hex TEXT,
                 clipped_packet_hex TEXT,
+                FOREIGN KEY(import_id) REFERENCES import_runs(id),
                 FOREIGN KEY(exporter_key) REFERENCES exporters(exporter_key),
                 FOREIGN KEY(flow_key) REFERENCES flows(flow_key)
             );
@@ -88,9 +90,11 @@ class SqliteStore:
 
             CREATE TABLE IF NOT EXISTS parse_errors (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                import_id INTEGER,
                 timestamp_ns INTEGER,
                 error TEXT NOT NULL,
-                count INTEGER NOT NULL DEFAULT 1
+                count INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY(import_id) REFERENCES import_runs(id)
             );
 
             CREATE TABLE IF NOT EXISTS import_runs (
@@ -102,12 +106,14 @@ class SqliteStore:
             );
             """
         )
+        _ensure_column(self.conn, "ifa_records", "import_id", "INTEGER")
+        _ensure_column(self.conn, "parse_errors", "import_id", "INTEGER")
         self.conn.commit()
 
-    def insert_error(self, timestamp_ns: int, error: str) -> None:
+    def insert_error(self, timestamp_ns: int, error: str, import_id: int | None = None) -> None:
         self.conn.execute(
-            "INSERT INTO parse_errors(timestamp_ns, error, count) VALUES (?, ?, 1)",
-            (timestamp_ns, error),
+            "INSERT INTO parse_errors(import_id, timestamp_ns, error, count) VALUES (?, ?, ?, 1)",
+            (import_id, timestamp_ns, error),
         )
 
     def record_import_run(self, imported_at_ns: int, source: str | None, parsed_ifa_records: int, parse_errors: int) -> int:
@@ -120,7 +126,17 @@ class SqliteStore:
         )
         return int(cursor.lastrowid)
 
-    def insert_packet(self, timestamp_ns: int | None, packet: Any, inventory: Inventory) -> None:
+    def update_import_run(self, import_id: int, parsed_ifa_records: int, parse_errors: int) -> None:
+        self.conn.execute(
+            """
+            UPDATE import_runs
+            SET parsed_ifa_records = ?, parse_errors = ?
+            WHERE id = ?
+            """,
+            (parsed_ifa_records, parse_errors, import_id),
+        )
+
+    def insert_packet(self, timestamp_ns: int | None, packet: Any, inventory: Inventory, import_id: int | None = None) -> None:
         wrapper = packet.wrapper or {}
         exporter_key = _exporter_key(wrapper)
         sequence = wrapper.get("sequence_number")
@@ -139,12 +155,13 @@ class SqliteStore:
         cursor = self.conn.execute(
             """
             INSERT INTO ifa_records(
-                timestamp_ns, exporter_key, sequence_number, observation_domain_id, set_id, flow_key,
+                import_id, timestamp_ns, exporter_key, sequence_number, observation_domain_id, set_id, flow_key,
                 metadata_path, traffic_path, resolved_traffic_path, hop_count,
                 raw_metadata_hex, clipped_packet_hex
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                import_id,
                 timestamp_ns,
                 exporter_key,
                 sequence,
@@ -379,3 +396,9 @@ def _stored_resolved_path_key(hops: list[dict[str, Any]]) -> str:
         egress = hop.get("egress_interface") or hop.get("egress_logical_port")
         labels.append(f"{name}({ingress}->{egress})")
     return " -> ".join(labels)
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, column_type: str) -> None:
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")

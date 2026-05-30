@@ -26,6 +26,8 @@ class QueryStore:
             )
             """
         )
+        _ensure_column(self.conn, "ifa_records", "import_id", "INTEGER")
+        _ensure_column(self.conn, "parse_errors", "import_id", "INTEGER")
         self.conn.commit()
 
     def exporters(self) -> list[dict[str, Any]]:
@@ -41,7 +43,29 @@ class QueryStore:
             )
         )
 
-    def flows(self, limit: int = 20) -> list[dict[str, Any]]:
+    def flows(self, limit: int = 20, import_id: int | None = None) -> list[dict[str, Any]]:
+        if import_id is not None:
+            return _rows_to_dicts(
+                self.conn.execute(
+                    """
+                    SELECT
+                        r.flow_key, f.src_ip, f.dst_ip, f.protocol, f.src_port, f.dst_port, f.tunnel_vni,
+                        COUNT(DISTINCT r.id) AS records,
+                        MIN(r.timestamp_ns) AS first_seen_ns,
+                        MAX(r.timestamp_ns) AS last_seen_ns,
+                        COUNT(DISTINCT r.resolved_traffic_path) AS paths,
+                        MIN(r.hop_count) AS min_hops,
+                        MAX(r.hop_count) AS max_hops
+                    FROM ifa_records AS r
+                    LEFT JOIN flows AS f ON f.flow_key = r.flow_key
+                    WHERE r.import_id = ?
+                    GROUP BY r.flow_key
+                    ORDER BY records DESC
+                    LIMIT ?
+                    """,
+                    (import_id, limit),
+                )
+            )
         return _rows_to_dicts(
             self.conn.execute(
                 """
@@ -61,10 +85,12 @@ class QueryStore:
             )
         )
 
-    def paths(self, limit: int = 20) -> list[dict[str, Any]]:
+    def paths(self, limit: int = 20, import_id: int | None = None) -> list[dict[str, Any]]:
+        where = "WHERE r.import_id = ?" if import_id is not None else ""
+        params: tuple[Any, ...] = (import_id, limit) if import_id is not None else (limit,)
         return _rows_to_dicts(
             self.conn.execute(
-                """
+                f"""
                 SELECT
                     r.resolved_traffic_path, r.traffic_path, r.metadata_path,
                     COUNT(DISTINCT r.id) AS records,
@@ -77,11 +103,12 @@ class QueryStore:
                     SUM(CASE WHEN h.egress_logical_port IS NOT NULL AND h.egress_interface IS NULL THEN 1 ELSE 0 END) AS unresolved_egress_ports
                 FROM ifa_records AS r
                 LEFT JOIN hops AS h ON h.record_id = r.id
+                {where}
                 GROUP BY r.resolved_traffic_path, r.traffic_path, r.metadata_path
                 ORDER BY records DESC
                 LIMIT ?
                 """,
-                (limit,),
+                params,
             )
         )
 
@@ -98,10 +125,12 @@ class QueryStore:
         ).fetchone()
         return {key: int(row[key] or 0) for key in row.keys()}
 
-    def unresolved_hops(self, limit: int = 100) -> list[dict[str, Any]]:
+    def unresolved_hops(self, limit: int = 100, import_id: int | None = None) -> list[dict[str, Any]]:
+        import_filter = "AND r.import_id = ?" if import_id is not None else ""
+        params: tuple[Any, ...] = (import_id, limit) if import_id is not None else (limit,)
         return _rows_to_dicts(
             self.conn.execute(
-                """
+                f"""
                 SELECT
                     h.record_id, h.traffic_index, h.device_id,
                     h.ingress_logical_port, h.ingress_interface,
@@ -109,13 +138,14 @@ class QueryStore:
                     r.flow_key, r.resolved_traffic_path, r.sequence_number, r.exporter_key
                 FROM hops AS h
                 JOIN ifa_records AS r ON r.id = h.record_id
-                WHERE h.device_name IS NULL
+                WHERE (h.device_name IS NULL
                    OR (h.ingress_logical_port IS NOT NULL AND h.ingress_interface IS NULL)
-                   OR (h.egress_logical_port IS NOT NULL AND h.egress_interface IS NULL)
+                   OR (h.egress_logical_port IS NOT NULL AND h.egress_interface IS NULL))
+                   {import_filter}
                 ORDER BY h.record_id DESC, h.traffic_index ASC
                 LIMIT ?
                 """,
-                (limit,),
+                params,
             )
         )
 
@@ -180,9 +210,11 @@ class QueryStore:
 
         return {"flow": dict(flow), "paths": paths, "sample_records": records}
 
-    def path_detail(self, resolved_traffic_path: str) -> dict[str, Any]:
+    def path_detail(self, resolved_traffic_path: str, import_id: int | None = None) -> dict[str, Any]:
+        import_filter = "AND import_id = ?" if import_id is not None else ""
+        params: tuple[Any, ...] = (resolved_traffic_path, import_id) if import_id is not None else (resolved_traffic_path,)
         path = self.conn.execute(
-            """
+            f"""
             SELECT
                 resolved_traffic_path, traffic_path, metadata_path,
                 COUNT(DISTINCT id) AS records,
@@ -191,24 +223,27 @@ class QueryStore:
                 MAX(hop_count) AS max_hops
             FROM ifa_records
             WHERE resolved_traffic_path = ?
+              {import_filter}
             GROUP BY resolved_traffic_path, traffic_path, metadata_path
             ORDER BY records DESC
             LIMIT 1
             """,
-            (resolved_traffic_path,),
+            params,
         ).fetchone()
         if path is None:
             raise ValueError(f"path not found: {resolved_traffic_path}")
 
+        record_params: tuple[Any, ...] = (resolved_traffic_path, import_id) if import_id is not None else (resolved_traffic_path,)
         record = self.conn.execute(
-            """
+            f"""
             SELECT id, timestamp_ns, exporter_key, sequence_number, flow_key, resolved_traffic_path
             FROM ifa_records
             WHERE resolved_traffic_path = ?
+              {import_filter}
             ORDER BY id DESC
             LIMIT 1
             """,
-            (resolved_traffic_path,),
+            record_params,
         ).fetchone()
         sample_record = dict(record) if record else None
         if sample_record:
@@ -229,17 +264,20 @@ class QueryStore:
 
         return {"path": dict(path), "sample_record": sample_record}
 
-    def recent_records(self, limit: int = 20) -> list[dict[str, Any]]:
+    def recent_records(self, limit: int = 20, import_id: int | None = None) -> list[dict[str, Any]]:
+        where = "WHERE import_id = ?" if import_id is not None else ""
+        params: tuple[Any, ...] = (import_id, limit) if import_id is not None else (limit,)
         records = []
         for record in self.conn.execute(
-            """
+            f"""
             SELECT id, timestamp_ns, exporter_key, sequence_number, flow_key, hop_count,
-                   traffic_path, resolved_traffic_path
+                   import_id, traffic_path, resolved_traffic_path
             FROM ifa_records
+            {where}
             ORDER BY id DESC
             LIMIT ?
             """,
-            (limit,),
+            params,
         ):
             item = dict(record)
             item["hops"] = _rows_to_dicts(
@@ -271,20 +309,35 @@ class QueryStore:
             )
         )
 
-    def errors(self, limit: int = 20) -> list[dict[str, Any]]:
+    def errors(self, limit: int = 20, import_id: int | None = None) -> list[dict[str, Any]]:
+        where = "WHERE import_id = ?" if import_id is not None else ""
+        params: tuple[Any, ...] = (import_id, limit) if import_id is not None else (limit,)
         return _rows_to_dicts(
             self.conn.execute(
-                """
+                f"""
                 SELECT error, COUNT(*) AS occurrences, MIN(timestamp_ns) AS first_seen_ns, MAX(timestamp_ns) AS last_seen_ns
                 FROM parse_errors
+                {where}
                 GROUP BY error
                 ORDER BY occurrences DESC
                 LIMIT ?
                 """,
-                (limit,),
+                params,
             )
         )
 
 
 def _rows_to_dicts(cursor: sqlite3.Cursor) -> list[dict[str, Any]]:
     return [dict(row) for row in cursor.fetchall()]
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, column_type: str) -> None:
+    table_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table,),
+    ).fetchone()
+    if not table_exists:
+        return
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")

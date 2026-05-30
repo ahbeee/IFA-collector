@@ -77,25 +77,22 @@ def ingest_pcap(
     result = IngestResult(source=str(path))
     store = SqliteStore(db_path)
     try:
+        result.imported_at_ns = time.time_ns()
+        result.import_id = store.record_import_run(result.imported_at_ns, result.source, 0, 0)
+        store.commit()
         for record in read_pcap(path, ignore_truncated_tail=True):
             try:
                 packets = parse_frame(record.data, registry)
             except ValueError as exc:
-                store.insert_error(record.timestamp_ns, str(exc))
+                store.insert_error(record.timestamp_ns, str(exc), import_id=result.import_id)
                 result.parse_errors += 1
                 continue
             for packet in packets:
-                store.insert_packet(record.timestamp_ns, packet, inventory)
+                store.insert_packet(record.timestamp_ns, packet, inventory, import_id=result.import_id)
                 result.parsed_ifa_records += 1
                 if result.parsed_ifa_records % 5000 == 0:
                     store.commit()
-        result.imported_at_ns = time.time_ns()
-        result.import_id = store.record_import_run(
-            result.imported_at_ns,
-            result.source,
-            result.parsed_ifa_records,
-            result.parse_errors,
-        )
+        store.update_import_run(result.import_id, result.parsed_ifa_records, result.parse_errors)
         store.commit()
     finally:
         store.close()

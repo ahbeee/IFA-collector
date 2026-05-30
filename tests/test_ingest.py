@@ -22,5 +22,6 @@ def test_ingest_pcap_writes_records(tmp_path: Path) -> None:
         assert imports[0]["source"].endswith("IFA udp.pcap")
         assert imports[0]["parsed_ifa_records"] == 125
         assert imports[0]["parse_errors"] == 0
+        assert store.recent_records(import_id=result.import_id)[0]["import_id"] == result.import_id
     finally:
         store.close()
