@@ -1327,6 +1327,45 @@ INDEX_HTML = """<!doctype html>
       const pending = (state.tamSpec[kind] || []).map(item => item.name).filter(Boolean);
       return [...new Set([...existing, ...pending])];
     }
+    function pendingSessionMap() {
+      const byName = new Map();
+      (selectedTamDevice().ifa_sessions || []).forEach(session => {
+        if (session.name) byName.set(session.name, session);
+      });
+      (state.tamSpec.sessions || []).forEach(session => {
+        if (session.name) byName.set(session.name, session);
+      });
+      (state.tamSpec.delete.sessions || []).forEach(name => byName.delete(name));
+      return byName;
+    }
+    function deleteDependencyWarnings() {
+      const sessions = [...pendingSessionMap().values()];
+      const checks = [
+        {kind: 'collectors', label: 'collector', field: 'collector'},
+        {kind: 'samplers', label: 'sampler', field: 'sampler'},
+        {kind: 'flowgroups', label: 'flow group', field: 'flowgroup'}
+      ];
+      const warnings = [];
+      checks.forEach(check => {
+        (state.tamSpec.delete[check.kind] || []).forEach(name => {
+          const refs = sessions.filter(session => session[check.field] === name).map(session => session.name).filter(Boolean);
+          if (refs.length) {
+            warnings.push(`WARNING: ${check.label} ${name} is still used by IFA session(s): ${refs.join(', ')}. Queue those session deletes first, or the device may reject Apply.`);
+          }
+        });
+      });
+      return warnings;
+    }
+    function dependencyWarningForDelete(kind, name) {
+      if (kind === 'sessions') return '';
+      const label = kind === 'collectors' ? 'collector' : kind === 'samplers' ? 'sampler' : 'flow group';
+      const field = kind === 'collectors' ? 'collector' : kind === 'samplers' ? 'sampler' : 'flowgroup';
+      const refs = [...pendingSessionMap().values()]
+        .filter(session => session[field] === name)
+        .map(session => session.name)
+        .filter(Boolean);
+      return refs.length ? ` Warning: ${label} is used by IFA session(s): ${refs.join(', ')}.` : '';
+    }
     function setOptions(id, values, emptyLabel = '') {
       const select = document.getElementById(id);
       if (!select) return;
@@ -1388,9 +1427,11 @@ INDEX_HTML = """<!doctype html>
       }
     }
     function renderPendingTamSpec() {
-      const text = state.tamTasks.length
+      const taskText = state.tamTasks.length
         ? state.tamTasks.map(task => task.message + (task.status ? ' [' + task.status + ']' : '') + (task.error ? ' ' + task.error : '')).join('\\n')
         : 'No pending changes.';
+      const warnings = deleteDependencyWarnings();
+      const text = warnings.length ? `${taskText}\\n\\n${warnings.join('\\n')}` : taskText;
       document.getElementById('tamPending').textContent = text;
     }
     function queueMessage(message) {
@@ -1416,7 +1457,7 @@ INDEX_HTML = """<!doctype html>
       selected.forEach(name => {
         addDelete(kind, name);
         const singular = kind === 'sessions' ? 'IFA session' : kind.slice(0, -1);
-        queueTask(`Queued ${singular} ${name} delete operation.`, `delete ${singular} ${name}`);
+        queueTask(`Queued ${singular} ${name} delete operation.${dependencyWarningForDelete(kind, name)}`, `delete ${singular} ${name}`);
       });
       queueMessage(selected.length ? `Queued ${selected.length} ${kind} delete operation(s).` : `Select ${kind} rows before queueing delete.`);
     }
