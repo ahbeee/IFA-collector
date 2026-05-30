@@ -217,6 +217,8 @@ class QueryStore:
                 SELECT
                     resolved_traffic_path, traffic_path, metadata_path,
                     COUNT(*) AS records,
+                    MIN(timestamp_ns) AS first_seen_ns,
+                    MAX(timestamp_ns) AS last_seen_ns,
                     MIN(hop_count) AS min_hops,
                     MAX(hop_count) AS max_hops
                 FROM ifa_records

@@ -1375,6 +1375,19 @@ INDEX_HTML = """<!doctype html>
       const importQuery = state.selectedImportId ? `&import_id=${encodeURIComponent(state.selectedImportId)}` : '';
       const data = await api('/api/flow-detail?flow_key=' + encodeURIComponent(flowKey) + '&limit=3' + importQuery);
       const flow = data.flow;
+      const totalRecords = Number(flow.records || 0);
+      const pathRows = (data.paths || []).map(p => {
+        const share = totalRecords ? `${((Number(p.records || 0) / totalRecords) * 100).toFixed(1)}%` : '-';
+        return `<tr>
+          <td class="path"><code>${esc(p.resolved_traffic_path || '-')}</code></td>
+          <td><code>${esc(p.traffic_path || '-')}</code></td>
+          <td>${esc(p.records || 0)}</td>
+          <td>${esc(share)}</td>
+          <td>${esc(formatNsTime(p.first_seen_ns))}</td>
+          <td>${esc(formatNsTime(p.last_seen_ns))}</td>
+          <td>${esc(hopRange(p))}</td>
+        </tr>`;
+      });
       const records = data.sample_records.map(r => `<div>
         <p><span class="pill">seq ${esc(r.sequence_number)}</span> <code>${esc(r.resolved_traffic_path)}</code></p>
         <div class="hopline">${r.hops.map((h, i) => `<div class="hop">
@@ -1384,7 +1397,15 @@ INDEX_HTML = """<!doctype html>
           ttl ${esc(h.ttl)}
         </div>${i < r.hops.length - 1 ? '<span class="arrow">-></span>' : ''}`).join('')}</div>
       </div>`).join('');
-      document.getElementById('flowDetail').innerHTML = `<p><code>${esc(flow.flow_key)}</code></p>${records}`;
+      document.getElementById('flowDetail').innerHTML = `<div class="kv">
+        <strong>Flow</strong><code>${esc(flow.flow_key)}</code>
+        <strong>Records</strong><span>${esc(totalRecords)}</span>
+        <strong>Paths</strong><span>${esc((data.paths || []).length)}</span>
+        <strong>First Seen</strong><span>${esc(formatNsTime(flow.first_seen_ns))}</span>
+        <strong>Last Seen</strong><span>${esc(formatNsTime(flow.last_seen_ns))}</span>
+      </div>
+      ${table(['Resolved Path', 'Traffic IDs', 'Records', 'Share', 'First Seen', 'Last Seen', 'Hops'], pathRows)}
+      <div class="detail">${records || 'No sample records.'}</div>`;
       document.querySelector('[data-tab="flows"]').click();
     }
     document.querySelectorAll('.tabs button').forEach(btn => {
