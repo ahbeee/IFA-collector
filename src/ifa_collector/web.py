@@ -299,12 +299,24 @@ INDEX_HTML = """<!doctype html>
     </section>
 
     <section id="flows">
-      <div class="panel"><h2>Flows</h2><div id="flowsTable"></div></div>
+      <div class="panel">
+        <h2>Flows</h2>
+        <div class="inline-actions">
+          <div><label for="flowFilter">Filter</label><input id="flowFilter" placeholder="IP, port, protocol, path count"></div>
+        </div>
+        <div id="flowsTable"></div>
+      </div>
       <div class="panel"><h2>Flow Detail</h2><div id="flowDetail" class="detail">Select a flow.</div></div>
     </section>
 
     <section id="paths">
-      <div class="panel"><h2>Paths</h2><div id="pathsTable"></div></div>
+      <div class="panel">
+        <h2>Paths</h2>
+        <div class="inline-actions">
+          <div><label for="pathFilter">Filter</label><input id="pathFilter" placeholder="device, interface, switch-id, path"></div>
+        </div>
+        <div id="pathsTable"></div>
+      </div>
       <div class="panel"><h2>Path Detail</h2><div id="pathDetail" class="detail">Select a path.</div></div>
     </section>
 
@@ -435,7 +447,8 @@ INDEX_HTML = """<!doctype html>
       exporters: [], flows: [], paths: [], recentRecords: [], imports: [], errors: [], unresolved: [], topology: null, tam: null,
       resolution: null,
       devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
-      collector: null, selectedTopologyNode: null, selectedPath: null, selectedPathDetail: null, selectedImportId: null
+      collector: null, selectedTopologyNode: null, selectedPath: null, selectedPathDetail: null, selectedImportId: null,
+      flowFilter: '', pathFilter: ''
     };
 
     async function api(path, options) {
@@ -566,7 +579,11 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('exportersTable').innerHTML = table(['Exporter', 'Records', 'Gaps', 'Dup/Reorder', 'Sequence', 'First Seen', 'Last Seen', 'Idle'], rows);
     }
     function renderFlows() {
-      const rows = state.flows.map(f => `<tr class="clickable" onclick="loadFlow(${jsArg(f.flow_key)})">
+      const filtered = state.flows.filter(f => rowMatches(f, state.flowFilter, [
+        f.flow_key, f.src_ip, f.dst_ip, f.src_port, f.dst_port, protocolLabel(f.protocol),
+        f.records, f.paths, hopRange(f)
+      ]));
+      const rows = filtered.map(f => `<tr class="clickable" onclick="loadFlow(${jsArg(f.flow_key)})">
         <td><code>${esc(f.src_ip)}:${esc(f.src_port)} -> ${esc(f.dst_ip)}:${esc(f.dst_port)}</code></td>
         <td>${esc(protocolLabel(f.protocol))}</td>
         <td>${esc(f.records)}</td>
@@ -577,10 +594,14 @@ INDEX_HTML = """<!doctype html>
         <td>${esc(formatNsAge(f.last_seen_ns))}</td>
         <td><code>${esc(f.flow_key)}</code></td>
       </tr>`);
-      document.getElementById('flowsTable').innerHTML = table(['Flow', 'Proto', 'Records', 'Paths', 'Hops', 'First Seen', 'Last Seen', 'Idle', 'Key'], rows);
+      document.getElementById('flowsTable').innerHTML = filterStatus(state.flowFilter, filtered.length, state.flows.length) + table(['Flow', 'Proto', 'Records', 'Paths', 'Hops', 'First Seen', 'Last Seen', 'Idle', 'Key'], rows);
     }
     function renderPaths() {
-      const rows = state.paths.map(p => `<tr class="clickable" onclick="selectPath(${jsArg(p.resolved_traffic_path)})">
+      const filtered = state.paths.filter(p => rowMatches(p, state.pathFilter, [
+        p.resolved_traffic_path, p.traffic_path, p.metadata_path, p.records, p.flows,
+        hopRange(p), unresolvedTotal(p)
+      ]));
+      const rows = filtered.map(p => `<tr class="clickable" onclick="selectPath(${jsArg(p.resolved_traffic_path)})">
         <td class="path">${esc(p.resolved_traffic_path)}</td>
         <td><code>${esc(p.traffic_path)}</code></td>
         <td><code>${esc(p.metadata_path)}</code></td>
@@ -592,7 +613,16 @@ INDEX_HTML = """<!doctype html>
         <td>${esc(formatNsTime(p.last_seen_ns))}</td>
         <td>${esc(formatNsAge(p.last_seen_ns))}</td>
       </tr>`);
-      document.getElementById('pathsTable').innerHTML = table(['Resolved Traffic Path', 'Traffic Order', 'Metadata Order', 'Unresolved', 'Flows', 'Hops', 'Records', 'First Seen', 'Last Seen', 'Idle'], rows);
+      document.getElementById('pathsTable').innerHTML = filterStatus(state.pathFilter, filtered.length, state.paths.length) + table(['Resolved Traffic Path', 'Traffic Order', 'Metadata Order', 'Unresolved', 'Flows', 'Hops', 'Records', 'First Seen', 'Last Seen', 'Idle'], rows);
+    }
+    function rowMatches(row, filterText, fields) {
+      const query = String(filterText || '').trim().toLowerCase();
+      if (!query) return true;
+      return fields.concat(Object.values(row || {})).some(value => String(value ?? '').toLowerCase().includes(query));
+    }
+    function filterStatus(filterText, shown, total) {
+      if (!String(filterText || '').trim()) return '';
+      return `<div class="status">Showing ${esc(shown)} of ${esc(total)} rows for filter <code>${esc(filterText)}</code>.</div>`;
     }
     function unresolvedTotal(row) {
       return (row?.unresolved_devices || 0) + (row?.unresolved_ingress_ports || 0) + (row?.unresolved_egress_ports || 0);
@@ -1577,6 +1607,14 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('refreshData').addEventListener('click', () => loadAll().catch(err => {
       document.getElementById('pcapStatus').textContent = err.message || String(err);
     }));
+    document.getElementById('flowFilter').addEventListener('input', event => {
+      state.flowFilter = event.target.value;
+      renderFlows();
+    });
+    document.getElementById('pathFilter').addEventListener('input', event => {
+      state.pathFilter = event.target.value;
+      renderPaths();
+    });
     document.getElementById('pcapImport').addEventListener('click', () => importPcap().catch(err => {
       document.getElementById('pcapStatus').textContent = err.message || String(err);
     }));
