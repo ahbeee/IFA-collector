@@ -666,7 +666,15 @@ INDEX_HTML = """<!doctype html>
     }
     async function deleteImport(event, importId) {
       event.stopPropagation();
-      if (!confirm(`Delete import #${importId} and all records/errors from that import?`)) return;
+      const stats = await api(`/api/imports/stats?import_id=${encodeURIComponent(importId)}`);
+      if (!stats.imports) {
+        document.getElementById('pcapStatus').textContent = `Import #${importId} was not found.`;
+        await loadAll();
+        return;
+      }
+      const source = stats.source ? `\nSource: ${stats.source}` : '';
+      const summary = `${stats.records || 0} record(s), ${stats.hops || 0} hop(s), ${stats.errors || 0} parse error(s)`;
+      if (!confirm(`Delete import #${importId}?${source}\n\nThis will delete ${summary}.`)) return;
       const result = await api('/api/imports/delete', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -1486,6 +1494,13 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/imports":
                     limit = _limit(parsed.query)
                     self._send_json({"imports": _query(db_path).import_runs(limit)})
+                elif parsed.path == "/api/imports/stats":
+                    import_id = _required_import_id(parsed.query)
+                    store = SqliteStore(db_path)
+                    try:
+                        self._send_json(store.import_counts(import_id))
+                    finally:
+                        store.close()
                 elif parsed.path == "/api/resolution":
                     self._send_json(_query(db_path).resolution_summary())
                 elif parsed.path == "/api/unresolved-hops":
@@ -1673,6 +1688,13 @@ def _limit(query: str) -> int:
 def _import_id(query: str) -> int | None:
     value = parse_qs(query).get("import_id", [""])[0]
     return int(value) if value else None
+
+
+def _required_import_id(query: str) -> int:
+    value = _import_id(query)
+    if value is None or value <= 0:
+        raise ValueError("import_id is required")
+    return value
 
 
 def _web_device_specs(body: dict[str, object]) -> list[RestconfDevice]:

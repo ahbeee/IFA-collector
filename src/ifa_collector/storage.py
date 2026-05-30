@@ -242,7 +242,13 @@ class SqliteStore:
         self.conn.commit()
         return before
 
-    def delete_import_run(self, import_id: int) -> dict[str, int]:
+    def import_counts(self, import_id: int) -> dict[str, Any]:
+        row = self.conn.execute(
+            "SELECT id, imported_at_ns, source FROM import_runs WHERE id = ?",
+            (import_id,),
+        ).fetchone()
+        if row is None:
+            return {"imports": 0, "records": 0, "hops": 0, "errors": 0, "import_id": import_id}
         records = int(
             self.conn.execute(
                 "SELECT COUNT(*) FROM ifa_records WHERE import_id = ?",
@@ -269,6 +275,18 @@ class SqliteStore:
             ).fetchone()[0]
             or 0
         )
+        return {
+            "imports": 1,
+            "import_id": int(row[0]),
+            "imported_at_ns": int(row[1]),
+            "source": row[2],
+            "records": records,
+            "hops": hops,
+            "errors": errors,
+        }
+
+    def delete_import_run(self, import_id: int) -> dict[str, int]:
+        before = self.import_counts(import_id)
 
         self.conn.execute(
             "DELETE FROM hops WHERE record_id IN (SELECT id FROM ifa_records WHERE import_id = ?)",
@@ -279,7 +297,12 @@ class SqliteStore:
         deleted_imports = self.conn.execute("DELETE FROM import_runs WHERE id = ?", (import_id,)).rowcount
         self._rebuild_aggregate_counts()
         self.conn.commit()
-        return {"imports": int(deleted_imports or 0), "records": records, "hops": hops, "errors": errors}
+        return {
+            "imports": int(deleted_imports or 0),
+            "records": int(before["records"]),
+            "hops": int(before["hops"]),
+            "errors": int(before["errors"]),
+        }
 
     def re_resolve_inventory(self, inventory: Inventory) -> dict[str, int]:
         hop_rows = self.conn.execute(

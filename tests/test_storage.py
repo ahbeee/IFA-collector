@@ -113,10 +113,22 @@ def test_sqlite_store_deletes_import_run_and_rebuilds_counts(tmp_path: Path) -> 
     store.update_import_run(import_two, 1, 0)
     store.commit()
 
+    counts = store.import_counts(import_one)
+    missing_counts = store.import_counts(9999)
     result = store.delete_import_run(import_one)
     store.close()
 
     conn = sqlite3.connect(db_path)
+    assert counts == {
+        "imports": 1,
+        "import_id": import_one,
+        "imported_at_ns": 100,
+        "source": "one.pcap",
+        "records": 1,
+        "hops": 1,
+        "errors": 1,
+    }
+    assert missing_counts == {"imports": 0, "records": 0, "hops": 0, "errors": 0, "import_id": 9999}
     assert result == {"imports": 1, "records": 1, "hops": 1, "errors": 1}
     assert conn.execute("SELECT COUNT(*) FROM import_runs WHERE id = ?", (import_one,)).fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM ifa_records WHERE import_id = ?", (import_one,)).fetchone()[0] == 0
