@@ -63,4 +63,10 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
         "unresolved_ingress_ports": 1,
         "unresolved_egress_ports": 1,
     }
+    unresolved = store.unresolved_hops()
+    assert len(unresolved) == 1
+    assert unresolved[0]["record_id"] == 1
+    assert unresolved[0]["device_id"] == 1002
+    assert unresolved[0]["ingress_logical_port"] == 3
+    assert unresolved[0]["egress_logical_port"] == 79
     store.close()

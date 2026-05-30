@@ -83,6 +83,27 @@ class QueryStore:
         ).fetchone()
         return {key: int(row[key] or 0) for key in row.keys()}
 
+    def unresolved_hops(self, limit: int = 100) -> list[dict[str, Any]]:
+        return _rows_to_dicts(
+            self.conn.execute(
+                """
+                SELECT
+                    h.record_id, h.traffic_index, h.device_id,
+                    h.ingress_logical_port, h.ingress_interface,
+                    h.egress_logical_port, h.egress_interface,
+                    r.flow_key, r.resolved_traffic_path, r.sequence_number, r.exporter_key
+                FROM hops AS h
+                JOIN ifa_records AS r ON r.id = h.record_id
+                WHERE h.device_name IS NULL
+                   OR (h.ingress_logical_port IS NOT NULL AND h.ingress_interface IS NULL)
+                   OR (h.egress_logical_port IS NOT NULL AND h.egress_interface IS NULL)
+                ORDER BY h.record_id DESC, h.traffic_index ASC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        )
+
     def flow_detail(self, flow_key: str, limit: int = 10) -> dict[str, Any]:
         flow = self.conn.execute(
             """

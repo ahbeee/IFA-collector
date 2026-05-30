@@ -417,12 +417,13 @@ INDEX_HTML = """<!doctype html>
     </section>
 
     <section id="errors">
+      <div class="panel"><h2>Unresolved Hops</h2><div id="unresolvedTable"></div></div>
       <div class="panel"><h2>Parse Errors</h2><div id="errorsTable"></div></div>
     </section>
   </main>
   <script>
     const state = {
-      exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null,
+      exporters: [], flows: [], paths: [], errors: [], unresolved: [], topology: null, tam: null,
       resolution: null,
       devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
       collector: null, selectedTopologyNode: null, selectedPath: null
@@ -484,13 +485,14 @@ INDEX_HTML = """<!doctype html>
       return epochSeconds ? new Date(epochSeconds * 1000).toLocaleString() : '-';
     }
     async function loadAll() {
-      const [exporters, flows, paths, errors, topology, collector, resolution] = await Promise.all([
-        api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/errors'), api('/api/topology'), api('/api/collector/status'), api('/api/resolution')
+      const [exporters, flows, paths, errors, unresolved, topology, collector, resolution] = await Promise.all([
+        api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/errors'), api('/api/unresolved-hops?limit=100'), api('/api/topology'), api('/api/collector/status'), api('/api/resolution')
       ]);
       state.exporters = exporters.exporters;
       state.flows = flows.flows;
       state.paths = paths.paths;
       state.errors = errors.errors;
+      state.unresolved = unresolved.unresolved_hops;
       state.topology = topology;
       state.collector = collector;
       state.resolution = resolution;
@@ -579,6 +581,16 @@ INDEX_HTML = """<!doctype html>
       </div>`;
     }
     function renderErrors() {
+      const unresolvedRows = state.unresolved.map(h => `<tr>
+        <td>${esc(h.record_id)}</td>
+        <td>${esc(h.traffic_index)}</td>
+        <td>${esc(h.device_id || '-')}</td>
+        <td>${esc(h.ingress_logical_port || '-')} -> ${esc(h.egress_logical_port || '-')}</td>
+        <td>${esc(h.ingress_interface || '-')} -> ${esc(h.egress_interface || '-')}</td>
+        <td><code>${esc(h.flow_key || '-')}</code></td>
+        <td class="path">${esc(h.resolved_traffic_path || '-')}</td>
+      </tr>`);
+      document.getElementById('unresolvedTable').innerHTML = table(['Record', 'Hop', 'Device ID', 'Logical Ports', 'Resolved Interfaces', 'Flow', 'Path'], unresolvedRows);
       const rows = state.errors.map(e => `<tr><td>${esc(e.error)}</td><td>${esc(e.occurrences)}</td></tr>`);
       document.getElementById('errorsTable').innerHTML = table(['Error', 'Occurrences'], rows);
     }
@@ -1322,6 +1334,9 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     self._send_json({"paths": _query(db_path).paths(limit)})
                 elif parsed.path == "/api/resolution":
                     self._send_json(_query(db_path).resolution_summary())
+                elif parsed.path == "/api/unresolved-hops":
+                    limit = _limit(parsed.query)
+                    self._send_json({"unresolved_hops": _query(db_path).unresolved_hops(limit)})
                 elif parsed.path == "/api/errors":
                     limit = _limit(parsed.query)
                     self._send_json({"errors": _query(db_path).errors(limit)})
