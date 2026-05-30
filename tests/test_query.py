@@ -112,6 +112,12 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert recent[0]["id"] == 1
     assert recent[0]["resolved_traffic_path"] == "A -> B"
     assert [hop["device_id"] for hop in recent[0]["hops"]] == [1001, 1002]
+    record_detail = store.record_detail(1)
+    assert record_detail["record"]["flow_key"] == "flow"
+    assert record_detail["record"]["resolved_traffic_path"] == "A -> B"
+    assert [hop["device_id"] for hop in record_detail["hops"]] == [1001, 1002]
+    assert record_detail["hops"][0]["fields"] == {}
+    assert store.record_detail(9999) == {"record": None, "hops": []}
     imports = store.import_runs()
     import_one = next(item for item in imports if item["id"] == 1)
     assert import_one["source"] == "sample.pcap"

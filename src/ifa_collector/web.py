@@ -292,6 +292,7 @@ INDEX_HTML = """<!doctype html>
         <div id="collectorStatus" class="status">Collector status not loaded.</div>
       </div>
       <div class="panel"><h2>Recent IFA Records</h2><div id="recentRecordsTable"></div></div>
+      <div class="panel"><h2>Record Detail</h2><div id="recordDetail" class="detail">Select a recent record.</div></div>
       <div class="panel"><h2>PCAP Import History</h2><div id="importsTable"></div></div>
       <div class="panel"><h2>Exporters</h2><div id="exportersTable"></div></div>
     </section>
@@ -662,7 +663,7 @@ INDEX_HTML = """<!doctype html>
     function renderRecentRecords() {
       const rows = state.recentRecords.map(r => {
         const hops = (r.hops || []).map(h => `${hopDeviceDisplay(h)}(${h.ingress_interface || h.ingress_logical_port || '-'}->${h.egress_interface || h.egress_logical_port || '-'})`).join(' -> ');
-        return `<tr class="clickable" onclick="selectPath(${jsArg(r.resolved_traffic_path)})">
+        return `<tr class="clickable" onclick="loadRecord(${esc(r.id)})">
           <td>${esc(r.id)}</td>
           <td>${esc(r.sequence_number ?? '-')}</td>
           <td><code>${esc(r.flow_key || '-')}</code></td>
@@ -671,6 +672,43 @@ INDEX_HTML = """<!doctype html>
         </tr>`;
       });
       document.getElementById('recentRecordsTable').innerHTML = table(['Record', 'Seq', 'Flow', 'Path', 'Hops'], rows);
+    }
+    async function loadRecord(recordId) {
+      const data = await api(`/api/record-detail?id=${encodeURIComponent(recordId)}`);
+      if (!data.record) {
+        document.getElementById('recordDetail').textContent = `Record #${recordId} was not found.`;
+        return;
+      }
+      const record = data.record;
+      const hopRows = (data.hops || []).map(h => `<tr>
+        <td>${esc(h.traffic_index)}</td>
+        <td>${esc(h.metadata_index)}</td>
+        <td>${esc(hopDeviceDisplay(h))}</td>
+        <td>${esc(h.ingress_interface || h.ingress_logical_port || '-')} -> ${esc(h.egress_interface || h.egress_logical_port || '-')}</td>
+        <td>${esc(h.ttl || '-')}</td>
+        <td><code>${esc(h.raw_hex || '-')}</code></td>
+      </tr>`);
+      const actions = `<div class="inline-actions">
+        ${record.flow_key ? `<button class="secondary" onclick="loadFlow(${jsArg(record.flow_key)})">Open Flow</button>` : ''}
+        ${record.resolved_traffic_path ? `<button class="secondary" onclick="selectPath(${jsArg(record.resolved_traffic_path)})">Open Path</button>` : ''}
+      </div>`;
+      document.getElementById('recordDetail').innerHTML = `<div class="kv">
+        <strong>Record</strong><span>${esc(record.id)}</span>
+        <strong>Import</strong><span>${esc(record.import_id || '-')}</span>
+        <strong>Timestamp</strong><span>${esc(formatNsTime(record.timestamp_ns))}</span>
+        <strong>Exporter</strong><code>${esc(record.exporter_key || '-')}</code>
+        <strong>Sequence</strong><span>${esc(record.sequence_number ?? '-')}</span>
+        <strong>Observation Domain</strong><span>${esc(record.observation_domain_id ?? '-')}</span>
+        <strong>Set ID</strong><span>${esc(record.set_id ?? '-')}</span>
+        <strong>Flow</strong><code>${esc(record.flow_key || '-')}</code>
+        <strong>Traffic Path</strong><code>${esc(record.traffic_path || '-')}</code>
+        <strong>Metadata Path</strong><code>${esc(record.metadata_path || '-')}</code>
+        <strong>Resolved Path</strong><code>${esc(record.resolved_traffic_path || '-')}</code>
+        <strong>Raw Metadata Bytes</strong><span>${esc(Math.floor((record.raw_metadata_hex || '').length / 2))}</span>
+        <strong>Clipped Payload Bytes</strong><span>${esc(Math.floor((record.clipped_packet_hex || '').length / 2))}</span>
+      </div>
+      ${actions}
+      ${table(['Traffic Hop', 'Metadata Hop', 'Device', 'Ingress -> Egress', 'TTL', 'Raw'], hopRows)}`;
     }
     function renderImports() {
       const rows = state.imports.map(item => `<tr class="clickable ${state.selectedImportId === item.id ? 'selected-row' : ''}" onclick="selectImport(${esc(item.id)})">
@@ -1547,6 +1585,10 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/recent-records":
                     limit = _limit(parsed.query)
                     self._send_json({"records": _query(db_path).recent_records(limit, _import_id(parsed.query))})
+                elif parsed.path == "/api/record-detail":
+                    params = parse_qs(parsed.query)
+                    record_id = int(params.get("id", ["0"])[0])
+                    self._send_json(_query(db_path).record_detail(record_id))
                 elif parsed.path == "/api/imports":
                     limit = _limit(parsed.query)
                     self._send_json({"imports": _query(db_path).import_runs(limit)})

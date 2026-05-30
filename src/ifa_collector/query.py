@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -379,6 +380,41 @@ class QueryStore:
             )
             records.append(item)
         return records
+
+    def record_detail(self, record_id: int) -> dict[str, Any]:
+        record = self.conn.execute(
+            """
+            SELECT id, import_id, timestamp_ns, exporter_key, sequence_number,
+                   observation_domain_id, set_id, flow_key, metadata_path,
+                   traffic_path, resolved_traffic_path, hop_count,
+                   raw_metadata_hex, clipped_packet_hex
+            FROM ifa_records
+            WHERE id = ?
+            """,
+            (record_id,),
+        ).fetchone()
+        if not record:
+            return {"record": None, "hops": []}
+        hops = []
+        for hop in self.conn.execute(
+            """
+            SELECT traffic_index, metadata_index, device_id, device_name, model,
+                   ingress_logical_port, ingress_interface,
+                   egress_logical_port, egress_interface,
+                   ttl, raw_hex, fields_json
+            FROM hops
+            WHERE record_id = ?
+            ORDER BY traffic_index
+            """,
+            (record_id,),
+        ):
+            item = dict(hop)
+            try:
+                item["fields"] = json.loads(item.get("fields_json") or "{}")
+            except json.JSONDecodeError:
+                item["fields"] = {}
+            hops.append(item)
+        return {"record": dict(record), "hops": hops}
 
     def import_runs(self, limit: int = 20) -> list[dict[str, Any]]:
         return _rows_to_dicts(
