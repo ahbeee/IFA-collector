@@ -105,6 +105,12 @@ class Inventory:
             ports=ports,
         )
 
+    def stats(self) -> dict[str, int]:
+        return {
+            "devices": len(self.devices),
+            "logical_ports": sum(len(device.ports) for device in self.devices.values()),
+        }
+
     def resolve_hops(self, hops: list[HopMetadata], traffic_order: bool = False) -> list[dict[str, Any]]:
         ordered = list(reversed(hops)) if traffic_order else hops
         return [self.resolve_hop(hop) for hop in ordered]

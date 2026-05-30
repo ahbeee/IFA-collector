@@ -165,7 +165,9 @@ class UdpIngestCollector:
         with self._lock:
             if self._thread and not self._thread.is_alive():
                 self.state.running = False
-            return self.state.as_dict()
+            status = self.state.as_dict()
+            status["inventory"] = self.inventory.stats()
+            return status
 
     def _run(self) -> None:
         store = SqliteStore(self.db_path)

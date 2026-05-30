@@ -48,3 +48,4 @@ def test_inventory_updates_from_restconf_metadata_lanes() -> None:
     assert resolved[0]["ingress"]["front_panel"] == "Eth1/1"
     assert resolved[0]["egress"]["interface"] == "Ethernet48"
     assert resolved[0]["egress"]["front_panel"] == "Eth1/49"
+    assert inventory.stats() == {"devices": 1, "logical_ports": 5}

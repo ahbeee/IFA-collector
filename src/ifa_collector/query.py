@@ -51,19 +51,37 @@ class QueryStore:
             self.conn.execute(
                 """
                 SELECT
-                    resolved_traffic_path, traffic_path, metadata_path,
-                    COUNT(*) AS records,
-                    COUNT(DISTINCT flow_key) AS flows,
-                    MIN(hop_count) AS min_hops,
-                    MAX(hop_count) AS max_hops
-                FROM ifa_records
-                GROUP BY resolved_traffic_path, traffic_path, metadata_path
+                    r.resolved_traffic_path, r.traffic_path, r.metadata_path,
+                    COUNT(DISTINCT r.id) AS records,
+                    COUNT(DISTINCT r.flow_key) AS flows,
+                    MIN(r.hop_count) AS min_hops,
+                    MAX(r.hop_count) AS max_hops,
+                    COUNT(h.id) AS total_hops,
+                    SUM(CASE WHEN h.device_name IS NULL THEN 1 ELSE 0 END) AS unresolved_devices,
+                    SUM(CASE WHEN h.ingress_logical_port IS NOT NULL AND h.ingress_interface IS NULL THEN 1 ELSE 0 END) AS unresolved_ingress_ports,
+                    SUM(CASE WHEN h.egress_logical_port IS NOT NULL AND h.egress_interface IS NULL THEN 1 ELSE 0 END) AS unresolved_egress_ports
+                FROM ifa_records AS r
+                LEFT JOIN hops AS h ON h.record_id = r.id
+                GROUP BY r.resolved_traffic_path, r.traffic_path, r.metadata_path
                 ORDER BY records DESC
                 LIMIT ?
                 """,
                 (limit,),
             )
         )
+
+    def resolution_summary(self) -> dict[str, int]:
+        row = self.conn.execute(
+            """
+            SELECT
+                COUNT(*) AS hops,
+                SUM(CASE WHEN device_name IS NULL THEN 1 ELSE 0 END) AS unresolved_devices,
+                SUM(CASE WHEN ingress_logical_port IS NOT NULL AND ingress_interface IS NULL THEN 1 ELSE 0 END) AS unresolved_ingress_ports,
+                SUM(CASE WHEN egress_logical_port IS NOT NULL AND egress_interface IS NULL THEN 1 ELSE 0 END) AS unresolved_egress_ports
+            FROM hops
+            """
+        ).fetchone()
+        return {key: int(row[key] or 0) for key in row.keys()}
 
     def flow_detail(self, flow_key: str, limit: int = 10) -> dict[str, Any]:
         flow = self.conn.execute(

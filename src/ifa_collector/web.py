@@ -267,6 +267,7 @@ INDEX_HTML = """<!doctype html>
         <div class="metric"><div class="label">Exporters</div><div class="value" id="mExporters">-</div></div>
         <div class="metric"><div class="label">Flows</div><div class="value" id="mFlows">-</div></div>
         <div class="metric"><div class="label">Sequence Gaps</div><div class="value" id="mGaps">-</div></div>
+        <div class="metric"><div class="label">Unresolved Hops</div><div class="value" id="mUnresolved">-</div></div>
       </div>
       <div class="panel">
         <h2>PCAP Import</h2>
@@ -422,6 +423,7 @@ INDEX_HTML = """<!doctype html>
   <script>
     const state = {
       exporters: [], flows: [], paths: [], errors: [], topology: null, tam: null,
+      resolution: null,
       devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
       collector: null, selectedTopologyNode: null, selectedPath: null
     };
@@ -482,8 +484,8 @@ INDEX_HTML = """<!doctype html>
       return epochSeconds ? new Date(epochSeconds * 1000).toLocaleString() : '-';
     }
     async function loadAll() {
-      const [exporters, flows, paths, errors, topology, collector] = await Promise.all([
-        api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/errors'), api('/api/topology'), api('/api/collector/status')
+      const [exporters, flows, paths, errors, topology, collector, resolution] = await Promise.all([
+        api('/api/exporters'), api('/api/flows?limit=100'), api('/api/paths?limit=100'), api('/api/errors'), api('/api/topology'), api('/api/collector/status'), api('/api/resolution')
       ]);
       state.exporters = exporters.exporters;
       state.flows = flows.flows;
@@ -491,12 +493,14 @@ INDEX_HTML = """<!doctype html>
       state.errors = errors.errors;
       state.topology = topology;
       state.collector = collector;
+      state.resolution = resolution;
       render();
     }
     function render() {
       document.getElementById('mExporters').textContent = state.exporters.length;
       document.getElementById('mFlows').textContent = state.flows.length;
       document.getElementById('mGaps').textContent = state.exporters.reduce((a, e) => a + (e.gaps || 0), 0);
+      document.getElementById('mUnresolved').textContent = unresolvedTotal(state.resolution);
       renderExporters();
       renderFlows();
       renderPaths();
@@ -532,11 +536,15 @@ INDEX_HTML = """<!doctype html>
         <td class="path">${esc(p.resolved_traffic_path)}</td>
         <td><code>${esc(p.traffic_path)}</code></td>
         <td><code>${esc(p.metadata_path)}</code></td>
+        <td class="${unresolvedTotal(p) ? 'warn' : ''}">${esc(unresolvedTotal(p))}</td>
         <td>${esc(p.flows)}</td>
         <td>${esc(hopRange(p))}</td>
         <td>${esc(p.records)}</td>
       </tr>`);
-      document.getElementById('pathsTable').innerHTML = table(['Resolved Traffic Path', 'Traffic Order', 'Metadata Order', 'Flows', 'Hops', 'Records'], rows);
+      document.getElementById('pathsTable').innerHTML = table(['Resolved Traffic Path', 'Traffic Order', 'Metadata Order', 'Unresolved', 'Flows', 'Hops', 'Records'], rows);
+    }
+    function unresolvedTotal(row) {
+      return (row?.unresolved_devices || 0) + (row?.unresolved_ingress_ports || 0) + (row?.unresolved_egress_ports || 0);
     }
     function selectPath(pathText) {
       const row = state.paths.find(p => p.resolved_traffic_path === pathText) || {};
@@ -548,6 +556,9 @@ INDEX_HTML = """<!doctype html>
         <strong>Metadata IDs</strong><code>${esc(row.metadata_path || '-')}</code>
         <strong>Nodes</strong><span>${esc(nodes.join(' -> ') || '-')}</span>
         <strong>Records</strong><span>${esc(row.records || 0)}</span>
+        <strong>Unresolved Devices</strong><span class="${row.unresolved_devices ? 'warn' : ''}">${esc(row.unresolved_devices || 0)}</span>
+        <strong>Unresolved Ingress Ports</strong><span class="${row.unresolved_ingress_ports ? 'warn' : ''}">${esc(row.unresolved_ingress_ports || 0)}</span>
+        <strong>Unresolved Egress Ports</strong><span class="${row.unresolved_egress_ports ? 'warn' : ''}">${esc(row.unresolved_egress_ports || 0)}</span>
       </div>`;
       renderTopology();
       document.querySelector('[data-tab="paths"]').click();
@@ -563,6 +574,8 @@ INDEX_HTML = """<!doctype html>
         <strong>Last Packet</strong><span>${esc(formatTime(c.last_packet_time))}</span>
         <strong>Last Peer</strong><span>${esc(c.last_peer || '-')}</span>
         <strong>Last Error</strong><span>${esc(c.last_error || '-')}</span>
+        <strong>Inventory Switches</strong><span class="${c.inventory?.devices ? '' : 'warn'}">${esc(c.inventory?.devices || 0)}</span>
+        <strong>Inventory Ports</strong><span class="${c.inventory?.logical_ports ? '' : 'warn'}">${esc(c.inventory?.logical_ports || 0)}</span>
       </div>`;
     }
     function renderErrors() {
@@ -1306,6 +1319,8 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/paths":
                     limit = _limit(parsed.query)
                     self._send_json({"paths": _query(db_path).paths(limit)})
+                elif parsed.path == "/api/resolution":
+                    self._send_json(_query(db_path).resolution_summary())
                 elif parsed.path == "/api/errors":
                     limit = _limit(parsed.query)
                     self._send_json({"errors": _query(db_path).errors(limit)})
