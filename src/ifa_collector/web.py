@@ -424,6 +424,7 @@ INDEX_HTML = """<!doctype html>
 
     <section id="errors">
       <div class="panel"><h2>Unresolved Hops</h2><div id="unresolvedTable"></div></div>
+      <div class="panel"><h2>Unresolved Record Detail</h2><div id="unresolvedRecordDetail" class="detail">Select an unresolved hop.</div></div>
       <div class="panel"><h2>Parse Errors</h2><div id="errorsTable"></div></div>
       <div class="panel"><h2>Parse Error Detail</h2><div id="errorDetail" class="detail">Select a parse error.</div></div>
     </section>
@@ -676,8 +677,15 @@ INDEX_HTML = """<!doctype html>
     }
     async function loadRecord(recordId) {
       const data = await api(`/api/record-detail?id=${encodeURIComponent(recordId)}`);
+      renderRecordDetail(data, 'recordDetail', recordId);
+    }
+    async function loadUnresolvedRecord(recordId) {
+      const data = await api(`/api/record-detail?id=${encodeURIComponent(recordId)}`);
+      renderRecordDetail(data, 'unresolvedRecordDetail', recordId);
+    }
+    function renderRecordDetail(data, targetId, recordId) {
       if (!data.record) {
-        document.getElementById('recordDetail').textContent = `Record #${recordId} was not found.`;
+        document.getElementById(targetId).textContent = `Record #${recordId} was not found.`;
         return;
       }
       const record = data.record;
@@ -693,7 +701,7 @@ INDEX_HTML = """<!doctype html>
         ${record.flow_key ? `<button class="secondary" onclick="loadFlow(${jsArg(record.flow_key)})">Open Flow</button>` : ''}
         ${record.resolved_traffic_path ? `<button class="secondary" onclick="selectPath(${jsArg(record.resolved_traffic_path)})">Open Path</button>` : ''}
       </div>`;
-      document.getElementById('recordDetail').innerHTML = `<div class="kv">
+      document.getElementById(targetId).innerHTML = `<div class="kv">
         <strong>Record</strong><span>${esc(record.id)}</span>
         <strong>Import</strong><span>${esc(record.import_id || '-')}</span>
         <strong>Timestamp</strong><span>${esc(formatNsTime(record.timestamp_ns))}</span>
@@ -778,7 +786,7 @@ INDEX_HTML = """<!doctype html>
       return `${s}s`;
     }
     function renderErrors() {
-      const unresolvedRows = state.unresolved.map(h => `<tr>
+      const unresolvedRows = state.unresolved.map(h => `<tr class="clickable" onclick="loadUnresolvedRecord(${esc(h.record_id)})">
         <td>${esc(h.record_id)}</td>
         <td>${esc(h.traffic_index)}</td>
         <td>${esc(h.device_id || '-')}</td>
