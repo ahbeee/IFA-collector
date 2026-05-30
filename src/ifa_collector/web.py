@@ -457,7 +457,7 @@ INDEX_HTML = """<!doctype html>
 
     <section id="errors">
       <div class="panel"><h2>IFA Metadata Schemas</h2><div id="schemaTable"></div></div>
-      <div class="panel"><h2>Unresolved Hops</h2><div id="unresolvedTable"></div></div>
+      <div class="panel"><h2>Unresolved Hops</h2><div id="unresolvedSummary"></div><div id="unresolvedTable"></div></div>
       <div class="panel"><h2>Unresolved Record Detail</h2><div id="unresolvedRecordDetail" class="detail">Select an unresolved hop.</div></div>
       <div class="panel"><h2>Parse Errors</h2><div id="errorsTable"></div></div>
       <div class="panel"><h2>Parse Error Detail</h2><div id="errorDetail" class="detail">Select a parse error.</div></div>
@@ -465,7 +465,7 @@ INDEX_HTML = """<!doctype html>
   </main>
   <script>
     const state = {
-      exporters: [], flows: [], paths: [], recentRecords: [], imports: [], errors: [], unresolved: [], topology: null, tam: null,
+      exporters: [], flows: [], paths: [], recentRecords: [], imports: [], errors: [], unresolved: [], unresolvedSummary: null, topology: null, tam: null,
       resolution: null, schemas: [],
       devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
       collector: null, selectedTopologyNode: null, selectedPath: null, selectedPathDetail: null, selectedImportId: null,
@@ -555,8 +555,8 @@ INDEX_HTML = """<!doctype html>
     }
     async function loadAll() {
       const importQuery = state.selectedImportId ? `&import_id=${encodeURIComponent(state.selectedImportId)}` : '';
-      const [exporters, flows, paths, recentRecords, imports, errors, unresolved, topology, collector, resolution, schemas] = await Promise.all([
-        api(`/api/exporters?${importQuery.slice(1)}`), api(`/api/flows?limit=100${importQuery}`), api(`/api/paths?limit=100${importQuery}`), api(`/api/recent-records?limit=10${importQuery}`), api('/api/imports?limit=10'), api(`/api/errors?limit=100${importQuery}`), api(`/api/unresolved-hops?limit=100${importQuery}`), api('/api/topology'), api('/api/collector/status'), api(`/api/resolution?${importQuery.slice(1)}`), api('/api/schemas')
+      const [exporters, flows, paths, recentRecords, imports, errors, unresolved, unresolvedSummary, topology, collector, resolution, schemas] = await Promise.all([
+        api(`/api/exporters?${importQuery.slice(1)}`), api(`/api/flows?limit=100${importQuery}`), api(`/api/paths?limit=100${importQuery}`), api(`/api/recent-records?limit=10${importQuery}`), api('/api/imports?limit=10'), api(`/api/errors?limit=100${importQuery}`), api(`/api/unresolved-hops?limit=100${importQuery}`), api(`/api/unresolved-summary?limit=50${importQuery}`), api('/api/topology'), api('/api/collector/status'), api(`/api/resolution?${importQuery.slice(1)}`), api('/api/schemas')
       ]);
       state.exporters = exporters.exporters;
       state.flows = flows.flows;
@@ -565,6 +565,7 @@ INDEX_HTML = """<!doctype html>
       state.imports = imports.imports;
       state.errors = errors.errors;
       state.unresolved = unresolved.unresolved_hops;
+      state.unresolvedSummary = unresolvedSummary;
       state.topology = topology;
       state.collector = collector;
       state.resolution = resolution;
@@ -928,6 +929,33 @@ INDEX_HTML = """<!doctype html>
       return `${s}s`;
     }
     function renderErrors() {
+      const summary = state.unresolvedSummary || {devices: [], ports: []};
+      const deviceRows = (summary.devices || []).map(item => `<tr class="clickable" onclick="loadUnresolvedRecord(${esc(item.sample_record_id)})">
+        <td>${esc(item.device_id ?? '-')}</td>
+        <td>${esc(item.hops || 0)}</td>
+        <td>${esc(item.flows || 0)}</td>
+        <td>${esc(item.paths || 0)}</td>
+        <td>${esc(formatNsTime(item.first_seen_ns))}</td>
+        <td>${esc(formatNsTime(item.last_seen_ns))}</td>
+        <td>${esc(item.sample_record_id || '-')}</td>
+      </tr>`);
+      const portRows = (summary.ports || []).map(item => `<tr class="clickable" onclick="loadUnresolvedRecord(${esc(item.sample_record_id)})">
+        <td>${esc(item.device_id ?? '-')}</td>
+        <td>${esc(item.direction || '-')}</td>
+        <td>${esc(item.logical_port ?? '-')}</td>
+        <td>${esc(item.hops || 0)}</td>
+        <td>${esc(item.flows || 0)}</td>
+        <td>${esc(item.paths || 0)}</td>
+        <td>${esc(formatNsTime(item.first_seen_ns))}</td>
+        <td>${esc(formatNsTime(item.last_seen_ns))}</td>
+        <td>${esc(item.sample_record_id || '-')}</td>
+      </tr>`);
+      const totalUnresolved = unresolvedTotal(state.resolution);
+      document.getElementById('unresolvedSummary').innerHTML = totalUnresolved
+        ? `<div class="status">Missing mapping summary. Scan topology or Read TAM, then use Re-resolve DB after inventory changes.</div>
+          ${table(['Missing Device ID', 'Hops', 'Flows', 'Paths', 'First Seen', 'Last Seen', 'Sample Record'], deviceRows)}
+          ${table(['Device ID', 'Direction', 'Logical Port', 'Hops', 'Flows', 'Paths', 'First Seen', 'Last Seen', 'Sample Record'], portRows)}`
+        : '<div class="status">All stored hops are resolved against the current inventory.</div>';
       const unresolvedRows = state.unresolved.map(h => `<tr class="clickable" onclick="loadUnresolvedRecord(${esc(h.record_id)})">
         <td>${esc(h.record_id)}</td>
         <td>${esc(h.traffic_index)}</td>
@@ -1964,6 +1992,9 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/unresolved-hops":
                     limit = _limit(parsed.query)
                     self._send_json({"unresolved_hops": _query(db_path).unresolved_hops(limit, _import_id(parsed.query))})
+                elif parsed.path == "/api/unresolved-summary":
+                    limit = _limit(parsed.query)
+                    self._send_json(_query(db_path).unresolved_summary(limit, _import_id(parsed.query)))
                 elif parsed.path == "/api/errors":
                     limit = _limit(parsed.query)
                     self._send_json({"errors": _query(db_path).errors(limit, _import_id(parsed.query))})

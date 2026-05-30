@@ -95,6 +95,26 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert unresolved[0]["device_id"] == 1002
     assert unresolved[0]["ingress_logical_port"] == 3
     assert unresolved[0]["egress_logical_port"] == 79
+    unresolved_summary = store.unresolved_summary()
+    assert unresolved_summary["devices"] == [
+        {
+            "device_id": 1002,
+            "hops": 1,
+            "flows": 1,
+            "paths": 1,
+            "sample_record_id": 1,
+            "first_seen_ns": 10,
+            "last_seen_ns": 10,
+        }
+    ]
+    assert {
+        (item["device_id"], item["direction"], item["logical_port"], item["hops"])
+        for item in unresolved_summary["ports"]
+    } == {
+        (1002, "ingress", 3, 1),
+        (1002, "egress", 79, 1),
+    }
+    assert store.unresolved_summary(import_id=2) == {"devices": [], "ports": []}
     detail = store.path_detail("A -> B")
     assert detail["path"]["records"] == 1
     assert detail["flows"][0]["flow_key"] == "flow"

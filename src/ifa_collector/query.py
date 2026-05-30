@@ -188,6 +188,76 @@ class QueryStore:
             )
         )
 
+    def unresolved_summary(self, limit: int = 50, import_id: int | None = None) -> dict[str, list[dict[str, Any]]]:
+        import_filter = "AND r.import_id = ?" if import_id is not None else ""
+        params: tuple[Any, ...] = (import_id, limit) if import_id is not None else (limit,)
+        devices = _rows_to_dicts(
+            self.conn.execute(
+                f"""
+                SELECT
+                    h.device_id,
+                    COUNT(*) AS hops,
+                    COUNT(DISTINCT r.flow_key) AS flows,
+                    COUNT(DISTINCT r.resolved_traffic_path) AS paths,
+                    MIN(r.id) AS sample_record_id,
+                    MIN(r.timestamp_ns) AS first_seen_ns,
+                    MAX(r.timestamp_ns) AS last_seen_ns
+                FROM hops AS h
+                JOIN ifa_records AS r ON r.id = h.record_id
+                WHERE h.device_name IS NULL
+                  {import_filter}
+                GROUP BY h.device_id
+                ORDER BY hops DESC, h.device_id
+                LIMIT ?
+                """,
+                params,
+            )
+        )
+
+        ports = _rows_to_dicts(
+            self.conn.execute(
+                f"""
+                SELECT
+                    h.device_id,
+                    'ingress' AS direction,
+                    h.ingress_logical_port AS logical_port,
+                    COUNT(*) AS hops,
+                    COUNT(DISTINCT r.flow_key) AS flows,
+                    COUNT(DISTINCT r.resolved_traffic_path) AS paths,
+                    MIN(r.id) AS sample_record_id,
+                    MIN(r.timestamp_ns) AS first_seen_ns,
+                    MAX(r.timestamp_ns) AS last_seen_ns
+                FROM hops AS h
+                JOIN ifa_records AS r ON r.id = h.record_id
+                WHERE h.ingress_logical_port IS NOT NULL
+                  AND h.ingress_interface IS NULL
+                  {import_filter}
+                GROUP BY h.device_id, h.ingress_logical_port
+                UNION ALL
+                SELECT
+                    h.device_id,
+                    'egress' AS direction,
+                    h.egress_logical_port AS logical_port,
+                    COUNT(*) AS hops,
+                    COUNT(DISTINCT r.flow_key) AS flows,
+                    COUNT(DISTINCT r.resolved_traffic_path) AS paths,
+                    MIN(r.id) AS sample_record_id,
+                    MIN(r.timestamp_ns) AS first_seen_ns,
+                    MAX(r.timestamp_ns) AS last_seen_ns
+                FROM hops AS h
+                JOIN ifa_records AS r ON r.id = h.record_id
+                WHERE h.egress_logical_port IS NOT NULL
+                  AND h.egress_interface IS NULL
+                  {import_filter}
+                GROUP BY h.device_id, h.egress_logical_port
+                ORDER BY hops DESC, device_id, logical_port, direction
+                LIMIT ?
+                """,
+                (import_id, import_id, limit) if import_id is not None else (limit,),
+            )
+        )
+        return {"devices": devices, "ports": ports}
+
     def flow_detail(self, flow_key: str, limit: int = 10, import_id: int | None = None) -> dict[str, Any]:
         if import_id is not None:
             flow = self.conn.execute(
