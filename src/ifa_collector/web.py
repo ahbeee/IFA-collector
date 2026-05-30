@@ -658,6 +658,23 @@ INDEX_HTML = """<!doctype html>
     function unresolvedTotal(row) {
       return (row?.unresolved_devices || 0) + (row?.unresolved_ingress_ports || 0) + (row?.unresolved_egress_ports || 0);
     }
+    function hopPortDetail(h) {
+      const ingress = `${h.ingress_interface || '-'} (${h.ingress_logical_port ?? '-'})`;
+      const egress = `${h.egress_interface || '-'} (${h.egress_logical_port ?? '-'})`;
+      return `${ingress} -> ${egress}`;
+    }
+    function hopFieldSummary(h) {
+      const fields = h.fields || {};
+      const parts = [];
+      ['device_id', 'ip_ttl', 'queue_id', 'queue_depth_cells', 'congestion', 'timestamp_or_counter_low', 'timestamp_or_counter_high'].forEach(key => {
+        if (fields[key] !== undefined) {
+          const value = typeof fields[key] === 'object' && fields[key] !== null ? (fields[key].label || fields[key].raw) : fields[key];
+          const unit = fields[`${key}__unit`] ? ` ${fields[`${key}__unit`]}` : '';
+          parts.push(`${key}=${value}${unit}`);
+        }
+      });
+      return parts.join(', ') || '-';
+    }
     async function selectPath(pathText) {
       try {
         const row = state.paths.find(p => p.resolved_traffic_path === pathText) || {};
@@ -669,8 +686,11 @@ INDEX_HTML = """<!doctype html>
         const hopRows = hops.map(h => `<tr>
           <td>${esc(h.traffic_index)}</td>
           <td>${esc(hopDeviceDisplay(h))}</td>
-          <td>${esc(h.ingress_interface || h.ingress_logical_port || '-')} -> ${esc(h.egress_interface || h.egress_logical_port || '-')}</td>
+          <td>${esc(h.model || '-')}</td>
+          <td>${esc(hopPortDetail(h))}</td>
           <td>${esc(h.ttl || '-')}</td>
+          <td><code>${esc(hopFieldSummary(h))}</code></td>
+          <td><code>${esc(h.raw_hex || '-')}</code></td>
         </tr>`);
         const pathRecords = Number(row.records || state.selectedPathDetail.path?.records || 0);
         const flowRows = (state.selectedPathDetail.flows || []).map(f => {
@@ -705,7 +725,7 @@ INDEX_HTML = """<!doctype html>
         </div>
         ${table(['Flow', 'Records', 'Share', 'First Seen', 'Last Seen', 'Sequence Range'], flowRows)}
         ${table(['Record', 'Seq', 'Timestamp', 'Flow', 'Hops'], sampleRows)}
-        ${table(['Hop', 'Device', 'Ingress -> Egress', 'TTL'], hopRows)}`;
+        ${table(['Hop', 'Device', 'Model', 'Ingress(ifindex) -> Egress(ifindex)', 'TTL', 'Decoded Fields', 'Raw Hop Metadata'], hopRows)}`;
         renderTopology();
         document.querySelector('[data-tab="paths"]').click();
       } catch (err) {

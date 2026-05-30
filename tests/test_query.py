@@ -40,7 +40,7 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
         INSERT INTO ifa_records VALUES (1, 1, 10, 'exp', 1, 1, 257, 'flow', '2 -> 1', '1 -> 2', 'A -> B', 2, '', '');
         INSERT INTO ifa_records VALUES (2, 2, 30, 'exp', 2, 1, 257, 'flow', '3', '3', 'C', 1, '', '');
         INSERT INTO parse_errors VALUES (1, 1, 11, 'bad packet', 1);
-        INSERT INTO hops VALUES (1, 1, 0, 0, 1001, 'A', 'model', 3, 'Ethernet0', 79, 'Ethernet48', 63, '', '{}');
+        INSERT INTO hops VALUES (1, 1, 0, 0, 1001, 'A', 'model', 3, 'Ethernet0', 79, 'Ethernet48', 63, '', '{"queue_id": 0}');
         INSERT INTO hops VALUES (2, 1, 1, 1, 1002, NULL, NULL, 3, NULL, 79, NULL, 62, '', '{}');
         INSERT INTO hops VALUES (3, 2, 0, 0, 1003, 'C', 'model', 11, 'Ethernet11', 12, 'Ethernet12', 61, '', '{}');
         INSERT INTO import_runs VALUES (1, 123000000000, 'sample.pcap', 2, 1);
@@ -103,6 +103,7 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert detail["flows"][0]["last_sequence"] == 1
     assert detail["sample_record"]["flow_key"] == "flow"
     assert [hop["device_id"] for hop in detail["sample_record"]["hops"]] == [1001, 1002]
+    assert detail["sample_record"]["hops"][0]["fields"]["queue_id"] == 0
     assert [record["id"] for record in detail["sample_records"]] == [1]
     assert [hop["device_id"] for hop in detail["sample_records"][0]["hops"]] == [1001, 1002]
     flow_detail = store.flow_detail("flow", import_id=1)
@@ -120,7 +121,7 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert record_detail["record"]["flow_key"] == "flow"
     assert record_detail["record"]["resolved_traffic_path"] == "A -> B"
     assert [hop["device_id"] for hop in record_detail["hops"]] == [1001, 1002]
-    assert record_detail["hops"][0]["fields"] == {}
+    assert record_detail["hops"][0]["fields"] == {"queue_id": 0}
     assert store.record_detail(9999) == {"record": None, "hops": []}
     imports = store.import_runs()
     import_one = next(item for item in imports if item["id"] == 1)

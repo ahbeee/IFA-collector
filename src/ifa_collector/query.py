@@ -342,6 +342,11 @@ class QueryStore:
                     (sample_record["id"],),
                 )
             )
+            for hop in sample_record["hops"]:
+                try:
+                    hop["fields"] = json.loads(hop.get("fields_json") or "{}")
+                except json.JSONDecodeError:
+                    hop["fields"] = {}
             sample_records.append(sample_record)
 
         return {
