@@ -42,13 +42,21 @@ def read_tam_devices(devices: list[RestconfDevice]) -> dict[str, Any]:
 
 
 def preview_tam_plan(spec: dict[str, Any]) -> dict[str, Any]:
-    operations = _build_delete_operations(spec) + _build_set_operations(spec)
+    errors = _validation_errors(spec)
+    operations = [] if errors else _build_delete_operations(spec) + _build_set_operations(spec)
     warnings = _validate_operations(spec)
-    return {"operations": operations, "warnings": warnings, "summary": {"operations": len(operations), "warnings": len(warnings)}}
+    return {
+        "operations": operations,
+        "warnings": warnings,
+        "errors": errors,
+        "summary": {"operations": len(operations), "warnings": len(warnings), "errors": len(errors)},
+    }
 
 
 def apply_tam_plan(devices: list[RestconfDevice], spec: dict[str, Any]) -> dict[str, Any]:
     plan = preview_tam_plan(spec)
+    if plan.get("errors"):
+        raise ValueError("; ".join(plan["errors"]))
     results = []
     for device in devices:
         client = RestconfClient(
@@ -215,6 +223,68 @@ def _validate_operations(spec: dict[str, Any]) -> list[str]:
         if node_type == "EGRESS" and not session.get("collector"):
             warnings.append(f"Egress session {session.get('name')} needs a collector.")
     return warnings
+
+
+def _validation_errors(spec: dict[str, Any]) -> list[str]:
+    errors = []
+    deletes = spec.get("delete", {})
+    deleted_collectors = set(deletes.get("collectors", []))
+    deleted_samplers = set(deletes.get("samplers", []))
+    deleted_flowgroups = set(deletes.get("flowgroups", []))
+
+    for collector in spec.get("collectors", []):
+        name = collector.get("name") or "(unnamed collector)"
+        if not collector.get("name"):
+            errors.append("collector name is required")
+        if not collector.get("ip"):
+            errors.append(f"collector {name} IP is required")
+        if int(collector.get("port") or 0) <= 0:
+            errors.append(f"collector {name} port must be greater than zero")
+
+    for sampler in spec.get("samplers", []):
+        name = sampler.get("name") or "(unnamed sampler)"
+        if not sampler.get("name"):
+            errors.append("sampler name is required")
+        if int(sampler.get("sampling_rate") or 0) <= 0:
+            errors.append(f"sampler {name} sampling-rate must be greater than zero")
+
+    for flowgroup in spec.get("flowgroups", []):
+        name = flowgroup.get("name") or "(unnamed flowgroup)"
+        if not flowgroup.get("name"):
+            errors.append("flowgroup name is required")
+        if int(flowgroup.get("id") or flowgroup.get("flowgroup_id") or 0) <= 0:
+            errors.append(f"flowgroup {name} id must be greater than zero")
+
+    for session in spec.get("sessions", []):
+        name = session.get("name") or "(unnamed session)"
+        node_type = str(session.get("node_type", "")).upper()
+        if not session.get("name"):
+            errors.append("IFA session name is required")
+        flowgroup = session.get("flowgroup")
+        if not flowgroup:
+            errors.append(f"IFA session {name} flowgroup is required")
+        elif flowgroup in deleted_flowgroups:
+            errors.append(f"IFA session {name} references deleted flowgroup {flowgroup}")
+        if node_type == "INGRESS":
+            sampler = session.get("sampler")
+            if not sampler:
+                errors.append(f"ingress IFA session {name} sampler is required")
+            elif sampler in deleted_samplers:
+                errors.append(f"ingress IFA session {name} references deleted sampler {sampler}")
+            if session.get("collector"):
+                errors.append(f"ingress IFA session {name} must not include collector")
+        elif node_type == "EGRESS":
+            collector = session.get("collector")
+            if not collector:
+                errors.append(f"egress IFA session {name} collector is required")
+            elif collector in deleted_collectors:
+                errors.append(f"egress IFA session {name} references deleted collector {collector}")
+            if session.get("sampler"):
+                errors.append(f"egress IFA session {name} must not include sampler")
+        else:
+            errors.append(f"IFA session {name} node_type must be INGRESS or EGRESS")
+
+    return sorted(set(errors))
 
 
 def _patch_op(path: str, payload: dict[str, Any], description: str) -> dict[str, Any]:
