@@ -452,7 +452,13 @@ INDEX_HTML = """<!doctype html>
     function deviceInfo(host) {
       const configured = state.devices.find(d => d.host === host) || {};
       const tamDevice = (state.tam?.devices || []).find(d => d.host === host) || {};
-      return {...configured, ...tamDevice, host};
+      const topoDevice = topologyDeviceInfo(host);
+      return {...configured, ...topoDevice, ...tamDevice, host};
+    }
+    function topologyDeviceInfo(host) {
+      const nodes = state.topology?.graph?.nodes || [];
+      const node = nodes.find(n => n.ip === host || n.metadata?.hostname === host || String(n.metadata?.switch_id) === String(host));
+      return node?.metadata || {};
     }
     function deviceDisplay(host) {
       const info = deviceInfo(host);
@@ -462,6 +468,8 @@ INDEX_HTML = """<!doctype html>
       if (hop.device_name) return hop.device_name;
       const tamDevice = (state.tam?.devices || []).find(d => String(d.switch_id) === String(hop.device_id));
       if (tamDevice) return `${deviceDisplay(tamDevice.host)} / switch-id ${hop.device_id}`;
+      const topoNode = (state.topology?.graph?.nodes || []).find(n => String(n.metadata?.switch_id) === String(hop.device_id));
+      if (topoNode) return `${topoNode.id} / switch-id ${hop.device_id}`;
       return hop.device_id || '-';
     }
     function parsePathNodes(pathText) {
@@ -620,17 +628,22 @@ INDEX_HTML = """<!doctype html>
         document.getElementById('topologyNodeDetail').textContent = 'Select a topology node.';
         return;
       }
-      const tamDevice = (state.tam?.devices || []).find(d => d.host === node.ip || deviceDisplay(d.host).startsWith(node.id));
+      const topoMetadata = node.metadata || (state.topology?.devices || {})[node.id] || {};
+      const tamDevice = (state.tam?.devices || []).find(d => d.host === node.ip || d.hostname === node.id || String(d.switch_id) === String(topoMetadata.switch_id));
+      const mergedDevice = {...topoMetadata, ...(tamDevice || {})};
       const ports = interfaces[node.id] || [];
-      const portRows = ports.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.oper_status)}</td><td>${esc(p.speed)}</td><td>${esc(p.mac || '-')}</td></tr>`);
+      const portRows = ports.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.alias || '-')}</td><td>${esc(p.ifindex || '-')}</td><td>${esc(p.oper_status)}</td><td>${esc(p.speed)}</td><td>${esc(p.mac || '-')}</td></tr>`);
       document.getElementById('topologyNodeDetail').innerHTML = `<div class="kv">
         <strong>Node</strong><span>${esc(node.id)}</span>
         <strong>IP</strong><code>${esc(node.ip || '-')}</code>
-        <strong>Switch ID</strong><span>${esc(tamDevice?.switch_id || '-')}</span>
-        <strong>Enterprise ID</strong><span>${esc(tamDevice?.enterprise_id || '-')}</span>
-        <strong>IFA</strong><span>${esc(tamDevice?.ifa_status || '-')}</span>
+        <strong>Switch ID</strong><span>${esc(mergedDevice.switch_id || '-')}</span>
+        <strong>Enterprise ID</strong><span>${esc(mergedDevice.enterprise_id || '-')}</span>
+        <strong>Platform</strong><span>${esc(mergedDevice.platform || '-')}</span>
+        <strong>Product</strong><span>${esc(mergedDevice.product_name || '-')}</span>
+        <strong>Interface Naming</strong><span>${esc(mergedDevice.interface_naming_mode || '-')}</span>
+        <strong>IFA</strong><span>${esc(mergedDevice.ifa_status || '-')}</span>
         <strong>Neighbors</strong><span>${esc((neighbors[node.id] || []).map(n => `${n.local_interface}->${n.neighbor}`).join(', ') || '-')}</span>
-      </div>${table(['Interface', 'Oper', 'Speed', 'MAC'], portRows)}`;
+      </div>${table(['Interface', 'Alias', 'IfIndex', 'Oper', 'Speed', 'MAC'], portRows)}`;
     }
     function shortLabel(text) {
       text = String(text || '');
@@ -778,7 +791,7 @@ INDEX_HTML = """<!doctype html>
         return `<tr>
         <td><input name="tamDevice" data-tam-device="${i}" type="radio" ${state.tamDeviceIndex === i ? 'checked' : ''}></td>
         <td>${esc(row.host)}</td>
-        <td>${esc(row.hostname || '-')}</td>
+        <td>${esc(info.hostname || row.hostname || '-')}</td>
         <td>${esc(info.switch_id || '-')}</td>
         <td>${esc(info.enterprise_id || '-')}</td>
         <td>${esc(info.ifa_status || '-')}</td>
@@ -808,8 +821,11 @@ INDEX_HTML = """<!doctype html>
     function updateDeviceHostnames() {
       const nodes = state.topology?.graph?.nodes || [];
       const byIp = {};
-      nodes.forEach(node => { if (node.ip) byIp[node.ip] = node.id; });
-      state.devices.forEach(device => { device.hostname = byIp[device.host] || device.hostname || ''; });
+      nodes.forEach(node => { if (node.ip) byIp[node.ip] = node.metadata?.hostname || node.id; });
+      state.devices.forEach(device => {
+        const tamDevice = (state.tam?.devices || []).find(d => d.host === device.host);
+        device.hostname = tamDevice?.hostname || byIp[device.host] || device.hostname || '';
+      });
     }
     function flowgroupMatch(f) {
       const parts = [];
@@ -835,15 +851,18 @@ INDEX_HTML = """<!doctype html>
         : 'No TAM state loaded.';
       const switches = tam.devices.flatMap(d => [{
         host: d.host,
+        hostname: d.hostname,
         switch_id: d.switch_id,
         enterprise_id: d.enterprise_id,
+        platform: d.platform,
+        product_name: d.product_name,
         ifa_status: d.ifa_status,
         features: (d.features || []).map(f => `${f.feature}:${f.status}`).join(', ')
       }]);
-      document.getElementById('tamSwitches').innerHTML = table(['Host', 'Switch ID', 'Enterprise ID', 'IFA', 'VRFs', 'Features'],
+      document.getElementById('tamSwitches').innerHTML = table(['Host', 'Switch ID', 'Enterprise ID', 'Platform', 'Product', 'IFA', 'VRFs', 'Features'],
         switches.map(d => {
           const source = tam.devices.find(item => item.host === d.host) || {};
-          return `<tr><td>${esc(deviceDisplay(d.host))}</td><td>${esc(d.switch_id)}</td><td>${esc(d.enterprise_id)}</td><td>${esc(d.ifa_status)}</td><td>${esc((source.vrfs || []).join(', '))}</td><td>${esc(d.features)}</td></tr>`;
+          return `<tr><td>${esc(deviceDisplay(d.host))}</td><td>${esc(d.switch_id)}</td><td>${esc(d.enterprise_id)}</td><td>${esc(d.platform || '-')}</td><td>${esc(d.product_name || '-')}</td><td>${esc(d.ifa_status)}</td><td>${esc((source.vrfs || []).join(', '))}</td><td>${esc(d.features)}</td></tr>`;
         }));
       document.getElementById('tamCollectors').innerHTML = tableWithActions('collectors', ['Host', 'Name', 'IP', 'Port', 'Protocol', 'VRF'],
         tam.devices.flatMap(d => (d.collectors || []).map(c => `<tr><td><input type="checkbox" data-tam-delete="collectors" value="${esc(c.name)}"></td><td><button class="mini" data-tam-edit="collectors" data-tam-name="${esc(c.name)}">Edit</button></td><td>${esc(d.host)}</td><td>${esc(c.name)}</td><td>${esc(c.ip)}</td><td>${esc(c.port)}</td><td>${esc(c.protocol)}</td><td>${esc(c.vrf || '-')}</td></tr>`)));

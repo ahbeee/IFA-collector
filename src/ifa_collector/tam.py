@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .restconf import RestconfClient
-from .topology import RestconfDevice
+from .topology import RestconfDevice, fetch_device_metadata
 
 
 TAM_PATHS = {
@@ -33,10 +33,11 @@ def read_tam_devices(devices: list[RestconfDevice]) -> dict[str, Any]:
         )
         try:
             payloads = {name: client.get_json(path) for name, path in TAM_PATHS.items()}
+            metadata = fetch_device_metadata(client)
         except Exception as exc:
             errors.append({"host": device.host, "error": str(exc)})
             continue
-        results.append(_normalize_device(device.host, payloads))
+        results.append(_normalize_device(device.host, payloads, metadata))
     return {"devices": results, "errors": errors, "summary": {"devices": len(results), "errors": len(errors)}}
 
 
@@ -110,12 +111,22 @@ def clear_flowgroup_counters(devices: list[RestconfDevice], names: list[str]) ->
     return {"results": results, "summary": {"requests": len(results), "errors": len(errors)}}
 
 
-def _normalize_device(host: str, payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _normalize_device(host: str, payloads: dict[str, dict[str, Any]], metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     switch_state = _state(payloads["switch"].get("openconfig-tam:switch", {}))
+    metadata = metadata or {}
     return {
         "host": host,
+        "hostname": metadata.get("hostname"),
         "switch_id": switch_state.get("switch-id"),
         "enterprise_id": switch_state.get("enterprise-id"),
+        "platform": metadata.get("platform"),
+        "product_name": metadata.get("product_name"),
+        "serial_number": metadata.get("serial_number"),
+        "vendor": metadata.get("vendor"),
+        "base_mac": metadata.get("base_mac"),
+        "software_version": metadata.get("software_version"),
+        "interface_naming_mode": metadata.get("interface_naming_mode"),
+        "interfaces": metadata.get("interfaces", {}),
         "ifa_status": payloads["ifa_status"].get("openconfig-tam:op-status"),
         "features": _features(payloads["features"]),
         "collectors": _collectors(payloads["collectors"]),
