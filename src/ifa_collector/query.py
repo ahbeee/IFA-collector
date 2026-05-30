@@ -165,6 +165,55 @@ class QueryStore:
 
         return {"flow": dict(flow), "paths": paths, "sample_records": records}
 
+    def path_detail(self, resolved_traffic_path: str) -> dict[str, Any]:
+        path = self.conn.execute(
+            """
+            SELECT
+                resolved_traffic_path, traffic_path, metadata_path,
+                COUNT(DISTINCT id) AS records,
+                COUNT(DISTINCT flow_key) AS flows,
+                MIN(hop_count) AS min_hops,
+                MAX(hop_count) AS max_hops
+            FROM ifa_records
+            WHERE resolved_traffic_path = ?
+            GROUP BY resolved_traffic_path, traffic_path, metadata_path
+            ORDER BY records DESC
+            LIMIT 1
+            """,
+            (resolved_traffic_path,),
+        ).fetchone()
+        if path is None:
+            raise ValueError(f"path not found: {resolved_traffic_path}")
+
+        record = self.conn.execute(
+            """
+            SELECT id, timestamp_ns, exporter_key, sequence_number, flow_key, resolved_traffic_path
+            FROM ifa_records
+            WHERE resolved_traffic_path = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (resolved_traffic_path,),
+        ).fetchone()
+        sample_record = dict(record) if record else None
+        if sample_record:
+            sample_record["hops"] = _rows_to_dicts(
+                self.conn.execute(
+                    """
+                    SELECT traffic_index, device_id, device_name, model,
+                           ingress_logical_port, ingress_interface,
+                           egress_logical_port, egress_interface,
+                           ttl, raw_hex, fields_json
+                    FROM hops
+                    WHERE record_id = ?
+                    ORDER BY traffic_index
+                    """,
+                    (sample_record["id"],),
+                )
+            )
+
+        return {"path": dict(path), "sample_record": sample_record}
+
     def errors(self, limit: int = 20) -> list[dict[str, Any]]:
         return _rows_to_dicts(
             self.conn.execute(

@@ -97,6 +97,7 @@ INDEX_HTML = """<!doctype html>
     .pill { display: inline-block; padding: 2px 7px; border-radius: 999px; background: #e7f5f2; color: #0f766e; }
     .bad { color: var(--bad); font-weight: 600; }
     .warn { color: var(--warn); font-weight: 600; }
+    .selected-row { background: #ecfeff; }
     .clickable { cursor: pointer; }
     .clickable:hover { background: #f8fafc; }
     .detail { padding: 12px 14px; }
@@ -321,6 +322,7 @@ INDEX_HTML = """<!doctype html>
           <button id="topoReload" class="secondary">Reload</button>
           <button id="topoClear" class="secondary">Clear</button>
         </div>
+        <div id="topologyPathDetail" class="status">Select a path to highlight it on the topology.</div>
         <div id="topologyGraph" class="topology"></div>
       </div>
       <div class="panel"><h2>Selected Node</h2><div id="topologyNodeDetail" class="detail">Select a topology node.</div></div>
@@ -427,7 +429,7 @@ INDEX_HTML = """<!doctype html>
       exporters: [], flows: [], paths: [], errors: [], unresolved: [], topology: null, tam: null,
       resolution: null,
       devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
-      collector: null, selectedTopologyNode: null, selectedPath: null
+      collector: null, selectedTopologyNode: null, selectedPath: null, selectedPathDetail: null
     };
 
     async function api(path, options) {
@@ -481,6 +483,29 @@ INDEX_HTML = """<!doctype html>
         const index = part.indexOf('(');
         return (index >= 0 ? part.slice(0, index) : part).trim();
       }).filter(Boolean);
+    }
+    function topologyNodeForHop(hop) {
+      const nodes = state.topology?.graph?.nodes || [];
+      const candidates = [
+        hop.device_name,
+        hop.device_id != null ? String(hop.device_id) : ''
+      ].filter(Boolean).map(String);
+      const node = nodes.find(n => {
+        const metadata = n.metadata || {};
+        return candidates.includes(String(n.id))
+          || candidates.includes(String(n.label))
+          || candidates.includes(String(metadata.hostname))
+          || candidates.includes(String(metadata.switch_id));
+      });
+      return node?.id || hop.device_name || (hop.device_id != null ? String(hop.device_id) : '');
+    }
+    function selectedPathHops() {
+      return state.selectedPathDetail?.sample_record?.hops || [];
+    }
+    function selectedTopologyPathNodes() {
+      const hops = selectedPathHops();
+      if (hops.length) return hops.map(topologyNodeForHop).filter(Boolean);
+      return parsePathNodes(state.selectedPath);
     }
     function formatTime(epochSeconds) {
       return epochSeconds ? new Date(epochSeconds * 1000).toLocaleString() : '-';
@@ -549,22 +574,34 @@ INDEX_HTML = """<!doctype html>
     function unresolvedTotal(row) {
       return (row?.unresolved_devices || 0) + (row?.unresolved_ingress_ports || 0) + (row?.unresolved_egress_ports || 0);
     }
-    function selectPath(pathText) {
-      const row = state.paths.find(p => p.resolved_traffic_path === pathText) || {};
-      state.selectedPath = pathText;
-      const nodes = parsePathNodes(pathText);
-      document.getElementById('pathDetail').innerHTML = `<div class="kv">
-        <strong>Resolved</strong><code>${esc(pathText)}</code>
-        <strong>Traffic IDs</strong><code>${esc(row.traffic_path || '-')}</code>
-        <strong>Metadata IDs</strong><code>${esc(row.metadata_path || '-')}</code>
-        <strong>Nodes</strong><span>${esc(nodes.join(' -> ') || '-')}</span>
-        <strong>Records</strong><span>${esc(row.records || 0)}</span>
-        <strong>Unresolved Devices</strong><span class="${row.unresolved_devices ? 'warn' : ''}">${esc(row.unresolved_devices || 0)}</span>
-        <strong>Unresolved Ingress Ports</strong><span class="${row.unresolved_ingress_ports ? 'warn' : ''}">${esc(row.unresolved_ingress_ports || 0)}</span>
-        <strong>Unresolved Egress Ports</strong><span class="${row.unresolved_egress_ports ? 'warn' : ''}">${esc(row.unresolved_egress_ports || 0)}</span>
-      </div>`;
-      renderTopology();
-      document.querySelector('[data-tab="paths"]').click();
+    async function selectPath(pathText) {
+      try {
+        const row = state.paths.find(p => p.resolved_traffic_path === pathText) || {};
+        state.selectedPath = pathText;
+        state.selectedPathDetail = await api(`/api/path-detail?path=${encodeURIComponent(pathText)}`);
+        const nodes = selectedTopologyPathNodes();
+        const hops = selectedPathHops();
+        const hopRows = hops.map(h => `<tr>
+          <td>${esc(h.traffic_index)}</td>
+          <td>${esc(hopDeviceDisplay(h))}</td>
+          <td>${esc(h.ingress_interface || h.ingress_logical_port || '-')} -> ${esc(h.egress_interface || h.egress_logical_port || '-')}</td>
+          <td>${esc(h.ttl || '-')}</td>
+        </tr>`);
+        document.getElementById('pathDetail').innerHTML = `<div class="kv">
+          <strong>Resolved</strong><code>${esc(pathText)}</code>
+          <strong>Traffic IDs</strong><code>${esc(row.traffic_path || state.selectedPathDetail.path?.traffic_path || '-')}</code>
+          <strong>Metadata IDs</strong><code>${esc(row.metadata_path || state.selectedPathDetail.path?.metadata_path || '-')}</code>
+          <strong>Topology Nodes</strong><span>${esc(nodes.join(' -> ') || '-')}</span>
+          <strong>Records</strong><span>${esc(row.records || state.selectedPathDetail.path?.records || 0)}</span>
+          <strong>Unresolved Devices</strong><span class="${row.unresolved_devices ? 'warn' : ''}">${esc(row.unresolved_devices || 0)}</span>
+          <strong>Unresolved Ingress Ports</strong><span class="${row.unresolved_ingress_ports ? 'warn' : ''}">${esc(row.unresolved_ingress_ports || 0)}</span>
+          <strong>Unresolved Egress Ports</strong><span class="${row.unresolved_egress_ports ? 'warn' : ''}">${esc(row.unresolved_egress_ports || 0)}</span>
+        </div>${table(['Hop', 'Device', 'Ingress -> Egress', 'TTL'], hopRows)}`;
+        renderTopology();
+        document.querySelector('[data-tab="paths"]').click();
+      } catch (err) {
+        document.getElementById('pathDetail').textContent = err.message || String(err);
+      }
     }
     function renderCollector() {
       const c = state.collector || {};
@@ -611,7 +648,7 @@ INDEX_HTML = """<!doctype html>
       const width = 1000, height = 460, cx = width / 2, cy = height / 2;
       const radius = Math.max(120, Math.min(360, 120 + nodes.length * 18));
       const pos = {};
-      const selectedPathNodes = parsePathNodes(state.selectedPath);
+      const selectedPathNodes = selectedTopologyPathNodes();
       const selectedEdges = new Set();
       selectedPathNodes.forEach((node, index) => {
         if (index < selectedPathNodes.length - 1) {
@@ -637,9 +674,28 @@ INDEX_HTML = """<!doctype html>
           <text class="topology-label" x="${p.x}" y="${p.y + 4}">${esc(shortLabel(n.id))}</text></g>`;
       }).join('');
       document.getElementById('topologyGraph').innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img">${edgeSvg}${nodeSvg}</svg>`;
-      const rows = links.map(l => `<tr><td>${esc(l.source)} -> ${esc(l.target)}</td><td>${esc((l.source_interfaces || []).join(','))} / ${esc((l.target_interfaces || []).join(','))}</td><td>${esc(l.speed)}</td></tr>`);
+      const rows = links.map(l => {
+        const active = selectedEdges.has([l.source, l.target].sort().join('||'));
+        return `<tr class="${active ? 'selected-row' : ''}"><td>${esc(l.source)} -> ${esc(l.target)}</td><td>${esc((l.source_interfaces || []).join(','))} / ${esc((l.target_interfaces || []).join(','))}</td><td>${esc(l.speed)}</td></tr>`;
+      });
       document.getElementById('topologyLinks').innerHTML = table(['Link', 'Interfaces', 'Speed'], rows);
+      renderTopologyPathDetail();
       renderTopologyNodeDetail();
+    }
+    function renderTopologyPathDetail() {
+      const el = document.getElementById('topologyPathDetail');
+      if (!state.selectedPath) {
+        el.textContent = 'Select a path to highlight it on the topology.';
+        return;
+      }
+      const nodes = selectedTopologyPathNodes();
+      const row = state.paths.find(p => p.resolved_traffic_path === state.selectedPath) || {};
+      const unresolved = unresolvedTotal(row);
+      el.innerHTML = `<div class="kv">
+        <strong>Selected Path</strong><code>${esc(state.selectedPath)}</code>
+        <strong>Topology Nodes</strong><span>${esc(nodes.join(' -> ') || '-')}</span>
+        <strong>Unresolved</strong><span class="${unresolved ? 'warn' : ''}">${esc(unresolved)}</span>
+      </div>`;
     }
     function selectTopologyNode(nodeId) {
       state.selectedTopologyNode = nodeId;
@@ -1362,6 +1418,10 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     flow_key = unquote(params.get("flow_key", [""])[0])
                     limit = int(params.get("limit", ["10"])[0])
                     self._send_json(_query(db_path).flow_detail(flow_key, limit))
+                elif parsed.path == "/api/path-detail":
+                    params = parse_qs(parsed.query)
+                    path = unquote(params.get("path", [""])[0])
+                    self._send_json(_query(db_path).path_detail(path))
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             except ValueError as exc:

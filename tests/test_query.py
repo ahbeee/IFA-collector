@@ -69,4 +69,8 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert unresolved[0]["device_id"] == 1002
     assert unresolved[0]["ingress_logical_port"] == 3
     assert unresolved[0]["egress_logical_port"] == 79
+    detail = store.path_detail("A -> B")
+    assert detail["path"]["records"] == 1
+    assert detail["sample_record"]["flow_key"] == "flow"
+    assert [hop["device_id"] for hop in detail["sample_record"]["hops"]] == [1001, 1002]
     store.close()
