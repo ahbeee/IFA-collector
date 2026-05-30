@@ -10,6 +10,7 @@ from .ingest import UdpIngestCollector, ingest_pcap
 from .inventory import Inventory
 from .query import QueryStore
 from .schema import SchemaRegistry
+from .storage import SqliteStore
 from .tam import apply_tam_plan, preview_tam_plan, read_tam_devices
 from .topology import RestconfAuth, RestconfDevice, load_topology, scan_topology, scan_topology_devices, scan_topology_target_specs
 
@@ -273,8 +274,9 @@ INDEX_HTML = """<!doctype html>
           <div><label for="pcapPath">Local PCAP Path</label><input id="pcapPath" placeholder="C:\\captures\\ifa_udp.pcap"></div>
           <button id="pcapImport" class="primary">Import</button>
           <button id="refreshData" class="secondary">Refresh Data</button>
+          <button id="clearData" class="secondary">Clear DB Data</button>
         </div>
-        <div id="pcapStatus" class="status">Import writes parsed IFA records into the active SQLite database.</div>
+        <div id="pcapStatus" class="status">Import writes parsed IFA records into the active SQLite database. Clear DB Data removes exporters, flows, paths, hops, and parse errors only.</div>
       </div>
       <div class="panel">
         <h2>Live Collector</h2>
@@ -688,6 +690,14 @@ INDEX_HTML = """<!doctype html>
     async function refreshCollectorStatus() {
       state.collector = await api('/api/collector/status');
       renderCollector();
+    }
+    async function clearDbData() {
+      if (!confirm('Clear all IFA collector records from the active database? Topology and device credentials in this page stay unchanged.')) return;
+      const status = document.getElementById('pcapStatus');
+      status.textContent = 'Clearing DB data...';
+      const result = await api('/api/db/clear', {method: 'POST'});
+      status.textContent = `Cleared ${result.deleted_records || 0} record row(s).`;
+      await loadAll();
     }
     function splitTargets(text) {
       return String(text || '').split(/[\\s,]+/).map(item => item.trim()).filter(Boolean);
@@ -1163,6 +1173,9 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('pcapImport').addEventListener('click', () => importPcap().catch(err => {
       document.getElementById('pcapStatus').textContent = err.message || String(err);
     }));
+    document.getElementById('clearData').addEventListener('click', () => clearDbData().catch(err => {
+      document.getElementById('pcapStatus').textContent = err.message || String(err);
+    }));
     document.getElementById('collectorStart').addEventListener('click', () => startCollector().catch(err => {
       document.getElementById('collectorStatus').textContent = err.message || String(err);
     }));
@@ -1326,6 +1339,14 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     self._send_json(collector.start(listen_host, listen_port))
                 elif parsed.path == "/api/collector/stop":
                     self._send_json(collector.stop())
+                elif parsed.path == "/api/db/clear":
+                    before = _runtime_row_count(db_path)
+                    store = SqliteStore(db_path)
+                    try:
+                        store.clear_runtime_data()
+                    finally:
+                        store.close()
+                    self._send_json({"deleted_records": before})
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             except ValueError as exc:
@@ -1365,6 +1386,24 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
 
 def _query(db_path: Path) -> QueryStore:
     return QueryStore(db_path)
+
+
+def _runtime_row_count(db_path: Path) -> int:
+    store = QueryStore(db_path)
+    try:
+        row = store.conn.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM hops) +
+                (SELECT COUNT(*) FROM ifa_records) +
+                (SELECT COUNT(*) FROM flows) +
+                (SELECT COUNT(*) FROM exporters) +
+                (SELECT COUNT(*) FROM parse_errors)
+            """
+        ).fetchone()
+        return int(row[0] or 0)
+    finally:
+        store.close()
 
 
 def _limit(query: str) -> int:

@@ -174,6 +174,18 @@ class SqliteStore:
     def commit(self) -> None:
         self.conn.commit()
 
+    def clear_runtime_data(self) -> None:
+        self.conn.executescript(
+            """
+            DELETE FROM hops;
+            DELETE FROM ifa_records;
+            DELETE FROM flows;
+            DELETE FROM exporters;
+            DELETE FROM parse_errors;
+            """
+        )
+        self.conn.commit()
+
     def _upsert_exporter(
         self,
         exporter_key: str,
