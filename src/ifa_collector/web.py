@@ -1456,6 +1456,40 @@ INDEX_HTML = """<!doctype html>
         .filter(Boolean);
       return refs.length ? ` Warning: ${label} is used by IFA session(s): ${refs.join(', ')}.` : '';
     }
+    function availableTamNames(kind) {
+      const device = selectedTamDevice();
+      const existing = (device[kind] || []).map(item => item.name).filter(Boolean);
+      const pending = (state.tamSpec[kind] || []).map(item => item.name).filter(Boolean);
+      const deleted = new Set(state.tamSpec.delete[kind] || []);
+      return new Set([...existing, ...pending].filter(name => !deleted.has(name)));
+    }
+    function tamValidationErrors() {
+      const errors = deleteDependencyWarnings().map(message => message.replace(/^WARNING:/, 'ERROR:'));
+      const flowgroups = availableTamNames('flowgroups');
+      const collectors = availableTamNames('collectors');
+      const samplers = availableTamNames('samplers');
+      (state.tamSpec.sessions || []).forEach(session => {
+        const name = session.name || '(unnamed session)';
+        const nodeType = String(session.node_type || '').toUpperCase();
+        if (!session.flowgroup) {
+          errors.push(`ERROR: IFA session ${name} needs a flow group.`);
+        } else if (!flowgroups.has(session.flowgroup)) {
+          errors.push(`ERROR: IFA session ${name} references missing flow group ${session.flowgroup}.`);
+        }
+        if (nodeType === 'INGRESS') {
+          if (!session.sampler) errors.push(`ERROR: ingress IFA session ${name} needs a sampler.`);
+          else if (!samplers.has(session.sampler)) errors.push(`ERROR: ingress IFA session ${name} references missing sampler ${session.sampler}.`);
+          if (session.collector) errors.push(`ERROR: ingress IFA session ${name} should not use collector ${session.collector}.`);
+        } else if (nodeType === 'EGRESS') {
+          if (!session.collector) errors.push(`ERROR: egress IFA session ${name} needs a collector.`);
+          else if (!collectors.has(session.collector)) errors.push(`ERROR: egress IFA session ${name} references missing collector ${session.collector}.`);
+          if (session.sampler) errors.push(`ERROR: egress IFA session ${name} should not use sampler ${session.sampler}.`);
+        } else {
+          errors.push(`ERROR: IFA session ${name} node type must be INGRESS or EGRESS.`);
+        }
+      });
+      return [...new Set(errors)];
+    }
     function setOptions(id, values, emptyLabel = '') {
       const select = document.getElementById(id);
       if (!select) return;
@@ -1520,8 +1554,8 @@ INDEX_HTML = """<!doctype html>
       const taskText = state.tamTasks.length
         ? state.tamTasks.map(task => task.message + (task.status ? ' [' + task.status + ']' : '') + (task.error ? ' ' + task.error : '')).join('\\n')
         : 'No pending changes.';
-      const warnings = deleteDependencyWarnings();
-      const text = warnings.length ? `${taskText}\\n\\n${warnings.join('\\n')}` : taskText;
+      const errors = tamValidationErrors();
+      const text = errors.length ? `${taskText}\\n\\n${errors.join('\\n')}` : taskText;
       document.getElementById('tamPending').textContent = text;
     }
     function queueMessage(message) {
@@ -1627,6 +1661,12 @@ INDEX_HTML = """<!doctype html>
       queueTask(`Queued IFA session ${item.name}.`, `set IFA session ${item.name}`);
     }
     async function previewTam() {
+      const errors = tamValidationErrors();
+      if (errors.length) {
+        renderPendingTamSpec();
+        document.getElementById('tamPlan').textContent = `Preview blocked by ${errors.length} validation error(s).`;
+        return;
+      }
       const plan = await api('/api/tam/preview', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -1635,6 +1675,12 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('tamPlan').textContent = JSON.stringify(plan, null, 2);
     }
     async function applyTam() {
+      const errors = tamValidationErrors();
+      if (errors.length) {
+        renderPendingTamSpec();
+        document.getElementById('tamPlan').textContent = `Apply blocked by ${errors.length} validation error(s).`;
+        return;
+      }
       const devices = selectedDeviceSpecs();
       if (!devices.length) {
         document.getElementById('tamPlan').textContent = 'Select at least one device with IP, username, and password.';
