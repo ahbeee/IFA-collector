@@ -355,6 +355,7 @@ INDEX_HTML = """<!doctype html>
         <div id="topologyGraph" class="topology"></div>
       </div>
       <div class="panel"><h2>Selected Node</h2><div id="topologyNodeDetail" class="detail">Select a topology node.</div></div>
+      <div class="panel"><h2>Inventory Summary</h2><div id="topologyInventory"></div></div>
       <div class="panel"><h2>LLDP Links</h2><div id="topologyLinks"></div></div>
     </section>
 
@@ -943,6 +944,7 @@ INDEX_HTML = """<!doctype html>
         ? 'No topology file loaded.'
         : `${topo.summary.nodes || nodes.length} nodes, ${topo.summary.links || links.length} links, ${topo.errors?.length || 0} errors`;
       document.getElementById('topologyStatus').textContent = status;
+      renderTopologyInventory();
       if (!nodes.length) {
         document.getElementById('topologyGraph').innerHTML = '<p>No topology data. Run a scan or load a topology file.</p>';
         document.getElementById('topologyLinks').innerHTML = table(['Link', 'Interfaces', 'Speed'], []);
@@ -984,6 +986,44 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('topologyLinks').innerHTML = table(['Link', 'Interfaces', 'Speed'], rows);
       renderTopologyPathDetail();
       renderTopologyNodeDetail();
+    }
+    function renderTopologyInventory() {
+      const topo = state.topology || {};
+      const nodes = topo.graph?.nodes || [];
+      const nodeByHost = new Map();
+      nodes.forEach(node => {
+        const metadata = node.metadata || {};
+        [node.ip, node.id, metadata.hostname, metadata.switch_id].filter(Boolean).forEach(key => {
+          nodeByHost.set(String(key), node);
+        });
+      });
+      const keys = new Set();
+      state.devices.forEach(device => keys.add(device.host));
+      nodes.forEach(node => keys.add(node.ip || node.id));
+      (state.tam?.devices || []).forEach(device => keys.add(device.host || device.hostname || String(device.switch_id || '')));
+      const rows = [...keys].filter(Boolean).map(key => {
+        const node = nodeByHost.get(String(key)) || {};
+        const nodeId = node.id || key;
+        const topoMetadata = node.metadata || (topo.devices || {})[nodeId] || {};
+        const tamDevice = (state.tam?.devices || []).find(device =>
+          device.host === key || device.host === node.ip || device.hostname === nodeId || String(device.switch_id) === String(topoMetadata.switch_id)
+        ) || {};
+        const configured = state.devices.find(device => device.host === key || device.host === node.ip) || {};
+        const merged = {...configured, ...topoMetadata, ...tamDevice};
+        const ports = (topo.interfaces || {})[nodeId] || [];
+        const upPorts = ports.filter(port => String(port.oper_status || '').toLowerCase() === 'up').length;
+        return `<tr>
+          <td>${esc(merged.hostname || nodeId || '-')}</td>
+          <td><code>${esc(merged.host || node.ip || key)}</code></td>
+          <td>${esc(merged.switch_id || '-')}</td>
+          <td>${esc(merged.enterprise_id || '-')}</td>
+          <td>${esc(merged.product_name || merged.platform || '-')}</td>
+          <td>${esc(merged.interface_naming_mode || '-')}</td>
+          <td>${esc(ports.length ? `${upPorts}/${ports.length}` : '-')}</td>
+          <td>${esc(merged.ifa_status || '-')}</td>
+        </tr>`;
+      });
+      document.getElementById('topologyInventory').innerHTML = table(['Hostname', 'Host/IP', 'Switch ID', 'Enterprise ID', 'Model', 'Naming', 'Ports Up/Total', 'IFA'], rows);
     }
     function renderTopologyPathDetail() {
       const el = document.getElementById('topologyPathDetail');
