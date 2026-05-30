@@ -291,7 +291,13 @@ INDEX_HTML = """<!doctype html>
         </div>
         <div id="collectorStatus" class="status">Collector status not loaded.</div>
       </div>
-      <div class="panel"><h2>Recent IFA Records</h2><div id="recentRecordsTable"></div></div>
+      <div class="panel">
+        <h2>Recent IFA Records</h2>
+        <div class="inline-actions">
+          <div><label for="recordFilter">Filter</label><input id="recordFilter" placeholder="record, sequence, flow, path, hop"></div>
+        </div>
+        <div id="recentRecordsTable"></div>
+      </div>
       <div class="panel"><h2>Record Detail</h2><div id="recordDetail" class="detail">Select a recent record.</div></div>
       <div class="panel"><h2>PCAP Import History</h2><div id="importsTable"></div></div>
       <div class="panel"><h2>PCAP Import Detail</h2><div id="importDetail" class="detail">Select an import.</div></div>
@@ -454,7 +460,7 @@ INDEX_HTML = """<!doctype html>
       resolution: null,
       devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
       collector: null, selectedTopologyNode: null, selectedPath: null, selectedPathDetail: null, selectedImportId: null,
-      exporterFilter: '', flowFilter: '', pathFilter: ''
+      exporterFilter: '', flowFilter: '', pathFilter: '', recordFilter: ''
     };
 
     async function api(path, options) {
@@ -710,7 +716,14 @@ INDEX_HTML = """<!doctype html>
       </div>`;
     }
     function renderRecentRecords() {
-      const rows = state.recentRecords.map(r => {
+      const filtered = state.recentRecords.filter(r => {
+        const hops = (r.hops || []).map(h => `${hopDeviceDisplay(h)}(${h.ingress_interface || h.ingress_logical_port || '-'}->${h.egress_interface || h.egress_logical_port || '-'})`).join(' -> ');
+        return rowMatches(r, state.recordFilter, [
+          r.id, r.sequence_number, r.flow_key, r.resolved_traffic_path, r.traffic_path,
+          r.exporter_key, r.import_id, hops
+        ]);
+      });
+      const rows = filtered.map(r => {
         const hops = (r.hops || []).map(h => `${hopDeviceDisplay(h)}(${h.ingress_interface || h.ingress_logical_port || '-'}->${h.egress_interface || h.egress_logical_port || '-'})`).join(' -> ');
         return `<tr class="clickable" onclick="loadRecord(${esc(r.id)})">
           <td>${esc(r.id)}</td>
@@ -720,7 +733,7 @@ INDEX_HTML = """<!doctype html>
           <td class="path">${esc(hops || '-')}</td>
         </tr>`;
       });
-      document.getElementById('recentRecordsTable').innerHTML = table(['Record', 'Seq', 'Flow', 'Path', 'Hops'], rows);
+      document.getElementById('recentRecordsTable').innerHTML = filterStatus(state.recordFilter, filtered.length, state.recentRecords.length) + table(['Record', 'Seq', 'Flow', 'Path', 'Hops'], rows);
     }
     async function loadRecord(recordId) {
       const data = await api(`/api/record-detail?id=${encodeURIComponent(recordId)}`);
@@ -1620,6 +1633,10 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('exporterFilter').addEventListener('input', event => {
       state.exporterFilter = event.target.value;
       renderExporters();
+    });
+    document.getElementById('recordFilter').addEventListener('input', event => {
+      state.recordFilter = event.target.value;
+      renderRecentRecords();
     });
     document.getElementById('flowFilter').addEventListener('input', event => {
       state.flowFilter = event.target.value;
