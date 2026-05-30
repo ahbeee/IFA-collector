@@ -1331,20 +1331,22 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 if parsed.path == "/api/topology/scan":
                     body = self._read_json()
                     if body.get("credential_targets"):
-                        self._send_json(
-                            scan_topology_target_specs(
-                                body["credential_targets"],
-                                topology_path,
-                                rest_port=int(body.get("rest_port", body.get("port", 443))),
-                                path_prefix=str(body.get("path_prefix", "/restconf/data")),
-                                verify_tls=bool(body.get("verify_tls", False)),
-                                timeout=float(body.get("timeout", 10)),
-                                ping_first=bool(body.get("ping_first", True)),
-                                ping_timeout_ms=int(body.get("ping_timeout_ms", 500)),
-                            )
+                        result = scan_topology_target_specs(
+                            body["credential_targets"],
+                            topology_path,
+                            rest_port=int(body.get("rest_port", body.get("port", 443))),
+                            path_prefix=str(body.get("path_prefix", "/restconf/data")),
+                            verify_tls=bool(body.get("verify_tls", False)),
+                            timeout=float(body.get("timeout", 10)),
+                            ping_first=bool(body.get("ping_first", True)),
+                            ping_timeout_ms=int(body.get("ping_timeout_ms", 500)),
                         )
+                        inventory.update_from_topology(result)
+                        self._send_json(result)
                     elif body.get("devices"):
-                        self._send_json(scan_topology_devices(_web_device_specs(body), topology_path))
+                        result = scan_topology_devices(_web_device_specs(body), topology_path)
+                        inventory.update_from_topology(result)
+                        self._send_json(result)
                     else:
                         auth = RestconfAuth(
                             username=str(body.get("username", "")),
@@ -1358,18 +1360,20 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                         if not targets:
                             self.send_error(HTTPStatus.BAD_REQUEST, "targets is required")
                             return
-                        self._send_json(
-                            scan_topology(
-                                targets,
-                                auth,
-                                topology_path,
-                                ping_first=bool(body.get("ping_first", True)),
-                                ping_timeout_ms=int(body.get("ping_timeout_ms", 500)),
-                            )
+                        result = scan_topology(
+                            targets,
+                            auth,
+                            topology_path,
+                            ping_first=bool(body.get("ping_first", True)),
+                            ping_timeout_ms=int(body.get("ping_timeout_ms", 500)),
                         )
+                        inventory.update_from_topology(result)
+                        self._send_json(result)
                 elif parsed.path == "/api/tam/read":
                     body = self._read_json()
-                    self._send_json(read_tam_devices(_web_device_specs(body)))
+                    result = read_tam_devices(_web_device_specs(body))
+                    inventory.update_from_tam_devices(result.get("devices", []))
+                    self._send_json(result)
                 elif parsed.path == "/api/tam/preview":
                     body = self._read_json()
                     self._send_json(preview_tam_plan(_spec(body)))

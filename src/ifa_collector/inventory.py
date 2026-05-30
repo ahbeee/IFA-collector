@@ -65,6 +65,46 @@ class Inventory:
             )
         return cls(devices)
 
+    def update_from_topology(self, topology: dict[str, Any]) -> None:
+        for node in topology.get("graph", {}).get("nodes", []):
+            if not isinstance(node, dict):
+                continue
+            metadata = dict(node.get("metadata") or {})
+            if not metadata:
+                continue
+            metadata.setdefault("hostname", node.get("id"))
+            self.upsert_device_metadata(metadata)
+
+    def update_from_tam_devices(self, devices: list[dict[str, Any]]) -> None:
+        for device in devices:
+            self.upsert_device_metadata(device)
+
+    def upsert_device_metadata(self, metadata: dict[str, Any]) -> None:
+        device_id = _int_or_none(metadata.get("switch_id"))
+        if device_id is None:
+            return
+        existing = self.devices.get(device_id)
+        ports = dict(existing.ports) if existing else {}
+        for interface in (metadata.get("interfaces") or {}).values():
+            for logical_port in _logical_ports(interface):
+                ports[logical_port] = PortInfo(
+                    logical_port=logical_port,
+                    interface=interface.get("name"),
+                    front_panel=interface.get("alias"),
+                    speed=_format_speed(interface.get("speed")),
+                    peer_device_id=ports.get(logical_port).peer_device_id if logical_port in ports else None,
+                    peer_port=ports.get(logical_port).peer_port if logical_port in ports else None,
+                    peer_name=ports.get(logical_port).peer_name if logical_port in ports else None,
+                )
+        self.devices[device_id] = DeviceInfo(
+            device_id=device_id,
+            name=metadata.get("hostname") or (existing.name if existing else str(device_id)),
+            model=metadata.get("product_name") or metadata.get("platform") or (existing.model if existing else None),
+            role=existing.role if existing else None,
+            loopback_ip=existing.loopback_ip if existing else None,
+            ports=ports,
+        )
+
     def resolve_hops(self, hops: list[HopMetadata], traffic_order: bool = False) -> list[dict[str, Any]]:
         ordered = list(reversed(hops)) if traffic_order else hops
         return [self.resolve_hop(hop) for hop in ordered]
@@ -103,4 +143,27 @@ def _resolve_port(device: DeviceInfo | None, logical_port: int | None) -> dict[s
 
 
 def _int_or_none(value: Any) -> int | None:
-    return value if isinstance(value, int) else None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _logical_ports(interface: dict[str, Any]) -> list[int]:
+    ports = []
+    for value in str(interface.get("lanes") or "").split(","):
+        port = _int_or_none(value.strip())
+        if port is not None:
+            ports.append(port)
+    return ports
+
+
+def _format_speed(value: Any) -> str | None:
+    speed = _int_or_none(value)
+    if speed is None:
+        return str(value) if value else None
+    if speed >= 1000 and speed % 1000 == 0:
+        return f"{speed // 1000}G"
+    return f"{speed}M"
