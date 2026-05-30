@@ -595,16 +595,32 @@ INDEX_HTML = """<!doctype html>
           <td>${esc(h.ingress_interface || h.ingress_logical_port || '-')} -> ${esc(h.egress_interface || h.egress_logical_port || '-')}</td>
           <td>${esc(h.ttl || '-')}</td>
         </tr>`);
+        const pathRecords = Number(row.records || state.selectedPathDetail.path?.records || 0);
+        const flowRows = (state.selectedPathDetail.flows || []).map(f => {
+          const share = pathRecords ? `${((Number(f.records || 0) / pathRecords) * 100).toFixed(1)}%` : '-';
+          const sequenceRange = f.first_sequence == null ? '-' : `${f.first_sequence} - ${f.last_sequence}`;
+          return `<tr>
+            <td><code>${esc(f.flow_key || '-')}</code></td>
+            <td>${esc(f.records || 0)}</td>
+            <td>${esc(share)}</td>
+            <td>${esc(formatNsTime(f.first_seen_ns))}</td>
+            <td>${esc(formatNsTime(f.last_seen_ns))}</td>
+            <td>${esc(sequenceRange)}</td>
+          </tr>`;
+        });
         document.getElementById('pathDetail').innerHTML = `<div class="kv">
           <strong>Resolved</strong><code>${esc(pathText)}</code>
           <strong>Traffic IDs</strong><code>${esc(row.traffic_path || state.selectedPathDetail.path?.traffic_path || '-')}</code>
           <strong>Metadata IDs</strong><code>${esc(row.metadata_path || state.selectedPathDetail.path?.metadata_path || '-')}</code>
           <strong>Topology Nodes</strong><span>${esc(nodes.join(' -> ') || '-')}</span>
-          <strong>Records</strong><span>${esc(row.records || state.selectedPathDetail.path?.records || 0)}</span>
+          <strong>Records</strong><span>${esc(pathRecords)}</span>
+          <strong>Flows</strong><span>${esc((state.selectedPathDetail.flows || []).length)}</span>
           <strong>Unresolved Devices</strong><span class="${row.unresolved_devices ? 'warn' : ''}">${esc(row.unresolved_devices || 0)}</span>
           <strong>Unresolved Ingress Ports</strong><span class="${row.unresolved_ingress_ports ? 'warn' : ''}">${esc(row.unresolved_ingress_ports || 0)}</span>
           <strong>Unresolved Egress Ports</strong><span class="${row.unresolved_egress_ports ? 'warn' : ''}">${esc(row.unresolved_egress_ports || 0)}</span>
-        </div>${table(['Hop', 'Device', 'Ingress -> Egress', 'TTL'], hopRows)}`;
+        </div>
+        ${table(['Flow', 'Records', 'Share', 'First Seen', 'Last Seen', 'Sequence Range'], flowRows)}
+        ${table(['Hop', 'Device', 'Ingress -> Egress', 'TTL'], hopRows)}`;
         renderTopology();
         document.querySelector('[data-tab="paths"]').click();
       } catch (err) {

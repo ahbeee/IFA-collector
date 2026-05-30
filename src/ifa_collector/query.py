@@ -286,6 +286,26 @@ class QueryStore:
         if path is None:
             raise ValueError(f"path not found: {resolved_traffic_path}")
 
+        flow_rows = _rows_to_dicts(
+            self.conn.execute(
+                f"""
+                SELECT
+                    flow_key,
+                    COUNT(*) AS records,
+                    MIN(timestamp_ns) AS first_seen_ns,
+                    MAX(timestamp_ns) AS last_seen_ns,
+                    MIN(sequence_number) AS first_sequence,
+                    MAX(sequence_number) AS last_sequence
+                FROM ifa_records
+                WHERE resolved_traffic_path = ?
+                  {import_filter}
+                GROUP BY flow_key
+                ORDER BY records DESC, flow_key
+                """,
+                params,
+            )
+        )
+
         record_params: tuple[Any, ...] = (resolved_traffic_path, import_id) if import_id is not None else (resolved_traffic_path,)
         record = self.conn.execute(
             f"""
@@ -315,7 +335,7 @@ class QueryStore:
                 )
             )
 
-        return {"path": dict(path), "sample_record": sample_record}
+        return {"path": dict(path), "flows": flow_rows, "sample_record": sample_record}
 
     def recent_records(self, limit: int = 20, import_id: int | None = None) -> list[dict[str, Any]]:
         where = "WHERE import_id = ?" if import_id is not None else ""
