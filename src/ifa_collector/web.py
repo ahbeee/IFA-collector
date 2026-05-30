@@ -748,6 +748,10 @@ INDEX_HTML = """<!doctype html>
         <strong>Last Error</strong><span>${esc(c.last_error || '-')}</span>
         <strong>Inventory Switches</strong><span class="${c.inventory?.devices ? '' : 'warn'}">${esc(c.inventory?.devices || 0)}</span>
         <strong>Inventory Ports</strong><span class="${c.inventory?.logical_ports ? '' : 'warn'}">${esc(c.inventory?.logical_ports || 0)}</span>
+        <strong>DB Records</strong><span>${esc(c.database?.records || 0)}</span>
+        <strong>DB Hops</strong><span>${esc(c.database?.hops || 0)}</span>
+        <strong>DB Flows</strong><span>${esc(c.database?.flows || 0)}</span>
+        <strong>DB Errors</strong><span class="${c.database?.errors ? 'warn' : ''}">${esc(c.database?.errors || 0)}</span>
       </div>`;
     }
     function renderRecentRecords() {

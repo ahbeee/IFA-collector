@@ -182,6 +182,13 @@ class UdpIngestCollector:
                 self.state.running = False
             status = self.state.as_dict()
             status["inventory"] = self.inventory.stats()
+        store = SqliteStore(self.db_path)
+        try:
+            status["database"] = store.runtime_counts()
+        finally:
+            store.close()
+        with self._lock:
+            status["running"] = self.state.running
             return status
 
     def _run(self) -> None:
