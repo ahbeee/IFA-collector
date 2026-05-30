@@ -96,6 +96,8 @@ def test_query_store_lists_exporters_and_paths(tmp_path: Path) -> None:
     assert detail["flows"][0]["last_sequence"] == 1
     assert detail["sample_record"]["flow_key"] == "flow"
     assert [hop["device_id"] for hop in detail["sample_record"]["hops"]] == [1001, 1002]
+    assert [record["id"] for record in detail["sample_records"]] == [1]
+    assert [hop["device_id"] for hop in detail["sample_records"][0]["hops"]] == [1001, 1002]
     flow_detail = store.flow_detail("flow", import_id=1)
     assert flow_detail["flow"]["records"] == 1
     assert len(flow_detail["paths"]) == 1

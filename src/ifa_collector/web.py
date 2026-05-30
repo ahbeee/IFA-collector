@@ -589,7 +589,7 @@ INDEX_HTML = """<!doctype html>
         const row = state.paths.find(p => p.resolved_traffic_path === pathText) || {};
         state.selectedPath = pathText;
         const importQuery = state.selectedImportId ? `&import_id=${encodeURIComponent(state.selectedImportId)}` : '';
-        state.selectedPathDetail = await api(`/api/path-detail?path=${encodeURIComponent(pathText)}${importQuery}`);
+        state.selectedPathDetail = await api(`/api/path-detail?path=${encodeURIComponent(pathText)}&limit=5${importQuery}`);
         const nodes = selectedTopologyPathNodes();
         const hops = selectedPathHops();
         const hopRows = hops.map(h => `<tr>
@@ -611,6 +611,13 @@ INDEX_HTML = """<!doctype html>
             <td>${esc(sequenceRange)}</td>
           </tr>`;
         });
+        const sampleRows = (state.selectedPathDetail.sample_records || []).map(r => `<tr class="clickable" onclick="loadFlow(${jsArg(r.flow_key)})">
+          <td>${esc(r.id)}</td>
+          <td>${esc(r.sequence_number ?? '-')}</td>
+          <td>${esc(formatNsTime(r.timestamp_ns))}</td>
+          <td><code>${esc(r.flow_key || '-')}</code></td>
+          <td>${esc((r.hops || []).length)}</td>
+        </tr>`);
         document.getElementById('pathDetail').innerHTML = `<div class="kv">
           <strong>Resolved</strong><code>${esc(pathText)}</code>
           <strong>Traffic IDs</strong><code>${esc(row.traffic_path || state.selectedPathDetail.path?.traffic_path || '-')}</code>
@@ -623,6 +630,7 @@ INDEX_HTML = """<!doctype html>
           <strong>Unresolved Egress Ports</strong><span class="${row.unresolved_egress_ports ? 'warn' : ''}">${esc(row.unresolved_egress_ports || 0)}</span>
         </div>
         ${table(['Flow', 'Records', 'Share', 'First Seen', 'Last Seen', 'Sequence Range'], flowRows)}
+        ${table(['Record', 'Seq', 'Timestamp', 'Flow', 'Hops'], sampleRows)}
         ${table(['Hop', 'Device', 'Ingress -> Egress', 'TTL'], hopRows)}`;
         renderTopology();
         document.querySelector('[data-tab="paths"]').click();
@@ -1570,7 +1578,8 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                 elif parsed.path == "/api/path-detail":
                     params = parse_qs(parsed.query)
                     path = unquote(params.get("path", [""])[0])
-                    self._send_json(_query(db_path).path_detail(path, _import_id(parsed.query)))
+                    limit = int(params.get("limit", ["5"])[0])
+                    self._send_json(_query(db_path).path_detail(path, _import_id(parsed.query), limit))
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             except ValueError as exc:

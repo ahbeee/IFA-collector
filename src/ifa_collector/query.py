@@ -263,7 +263,7 @@ class QueryStore:
 
         return {"flow": dict(flow), "paths": paths, "sample_records": records}
 
-    def path_detail(self, resolved_traffic_path: str, import_id: int | None = None) -> dict[str, Any]:
+    def path_detail(self, resolved_traffic_path: str, import_id: int | None = None, limit: int = 5) -> dict[str, Any]:
         import_filter = "AND import_id = ?" if import_id is not None else ""
         params: tuple[Any, ...] = (resolved_traffic_path, import_id) if import_id is not None else (resolved_traffic_path,)
         path = self.conn.execute(
@@ -307,19 +307,19 @@ class QueryStore:
         )
 
         record_params: tuple[Any, ...] = (resolved_traffic_path, import_id) if import_id is not None else (resolved_traffic_path,)
-        record = self.conn.execute(
+        sample_records = []
+        for record in self.conn.execute(
             f"""
             SELECT id, timestamp_ns, exporter_key, sequence_number, flow_key, resolved_traffic_path
             FROM ifa_records
             WHERE resolved_traffic_path = ?
               {import_filter}
             ORDER BY id DESC
-            LIMIT 1
+            LIMIT ?
             """,
-            record_params,
-        ).fetchone()
-        sample_record = dict(record) if record else None
-        if sample_record:
+            (*record_params, limit),
+        ):
+            sample_record = dict(record)
             sample_record["hops"] = _rows_to_dicts(
                 self.conn.execute(
                     """
@@ -334,8 +334,14 @@ class QueryStore:
                     (sample_record["id"],),
                 )
             )
+            sample_records.append(sample_record)
 
-        return {"path": dict(path), "flows": flow_rows, "sample_record": sample_record}
+        return {
+            "path": dict(path),
+            "flows": flow_rows,
+            "sample_record": sample_records[0] if sample_records else None,
+            "sample_records": sample_records,
+        }
 
     def recent_records(self, limit: int = 20, import_id: int | None = None) -> list[dict[str, Any]]:
         where = "WHERE import_id = ?" if import_id is not None else ""
