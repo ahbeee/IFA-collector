@@ -275,9 +275,10 @@ INDEX_HTML = """<!doctype html>
           <div><label for="pcapPath">Local PCAP Path</label><input id="pcapPath" placeholder="C:\\captures\\ifa_udp.pcap"></div>
           <button id="pcapImport" class="primary">Import</button>
           <button id="refreshData" class="secondary">Refresh Data</button>
+          <button id="reResolveData" class="secondary">Re-resolve DB</button>
           <button id="clearData" class="secondary">Clear DB Data</button>
         </div>
-        <div id="pcapStatus" class="status">Import writes parsed IFA records into the active SQLite database. Clear DB Data removes exporters, flows, paths, hops, and parse errors only.</div>
+        <div id="pcapStatus" class="status">Import writes parsed IFA records into the active SQLite database. Re-resolve DB refreshes device and interface names from current topology/TAM inventory.</div>
       </div>
       <div class="panel">
         <h2>Live Collector</h2>
@@ -735,6 +736,13 @@ INDEX_HTML = """<!doctype html>
       status.textContent = 'Clearing DB data...';
       const result = await api('/api/db/clear', {method: 'POST'});
       status.textContent = `Cleared ${result.deleted_records || 0} record row(s).`;
+      await loadAll();
+    }
+    async function reResolveDbData() {
+      const status = document.getElementById('pcapStatus');
+      status.textContent = 'Re-resolving DB with current topology/TAM inventory...';
+      const result = await api('/api/db/reresolve', {method: 'POST'});
+      status.textContent = `Re-resolved ${result.records || 0} record(s), ${result.hops || 0} hop(s).`;
       await loadAll();
     }
     function splitTargets(text) {
@@ -1255,6 +1263,9 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('clearData').addEventListener('click', () => clearDbData().catch(err => {
       document.getElementById('pcapStatus').textContent = err.message || String(err);
     }));
+    document.getElementById('reResolveData').addEventListener('click', () => reResolveDbData().catch(err => {
+      document.getElementById('pcapStatus').textContent = err.message || String(err);
+    }));
     document.getElementById('collectorStart').addEventListener('click', () => startCollector().catch(err => {
       document.getElementById('collectorStatus').textContent = err.message || String(err);
     }));
@@ -1445,6 +1456,12 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     finally:
                         store.close()
                     self._send_json({"deleted_records": before})
+                elif parsed.path == "/api/db/reresolve":
+                    store = SqliteStore(db_path)
+                    try:
+                        self._send_json(store.re_resolve_inventory(inventory))
+                    finally:
+                        store.close()
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             except ValueError as exc:

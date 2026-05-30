@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .inventory import Inventory
+from .models import HopMetadata
 
 
 class SqliteStore:
@@ -186,6 +187,63 @@ class SqliteStore:
         )
         self.conn.commit()
 
+    def re_resolve_inventory(self, inventory: Inventory) -> dict[str, int]:
+        hop_rows = self.conn.execute(
+            """
+            SELECT id, record_id, device_id, ingress_logical_port, egress_logical_port, fields_json
+            FROM hops
+            ORDER BY record_id, metadata_index
+            """
+        ).fetchall()
+
+        hops_by_record: dict[int, list[dict[str, Any]]] = {}
+        updated_hops = 0
+        for hop_id, record_id, device_id, ingress_port, egress_port, fields_json in hop_rows:
+            fields = _stored_hop_fields(fields_json)
+            fields["device_id"] = device_id
+            fields["ingress_logical_port"] = ingress_port
+            fields["egress_logical_port"] = egress_port
+            resolved = inventory.resolve_hop(HopMetadata(b"", fields))
+            ingress = resolved["ingress"]
+            egress = resolved["egress"]
+            self.conn.execute(
+                """
+                UPDATE hops
+                SET device_name = ?, model = ?, ingress_interface = ?, egress_interface = ?
+                WHERE id = ?
+                """,
+                (
+                    resolved.get("device_name"),
+                    resolved.get("model"),
+                    ingress.get("interface"),
+                    egress.get("interface"),
+                    hop_id,
+                ),
+            )
+            updated_hops += 1
+            hops_by_record.setdefault(int(record_id), []).append(
+                {
+                    "device_id": device_id,
+                    "device_name": resolved.get("device_name"),
+                    "ingress_logical_port": ingress_port,
+                    "ingress_interface": ingress.get("interface"),
+                    "egress_logical_port": egress_port,
+                    "egress_interface": egress.get("interface"),
+                }
+            )
+
+        updated_records = 0
+        for record_id, hops in hops_by_record.items():
+            path = _stored_resolved_path_key(list(reversed(hops)))
+            self.conn.execute(
+                "UPDATE ifa_records SET resolved_traffic_path = ? WHERE id = ?",
+                (path, record_id),
+            )
+            updated_records += 1
+
+        self.conn.commit()
+        return {"records": updated_records, "hops": updated_hops}
+
     def _upsert_exporter(
         self,
         exporter_key: str,
@@ -280,5 +338,25 @@ def _resolved_path_key(hops: list[Any], inventory: Inventory) -> str:
         name = hop["device_name"] or str(hop["device_id"])
         ingress = hop["ingress"]["interface"] or hop["ingress"]["logical_port"]
         egress = hop["egress"]["interface"] or hop["egress"]["logical_port"]
+        labels.append(f"{name}({ingress}->{egress})")
+    return " -> ".join(labels)
+
+
+def _stored_hop_fields(fields_json: str | None) -> dict[str, Any]:
+    if not fields_json:
+        return {}
+    try:
+        value = json.loads(fields_json)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _stored_resolved_path_key(hops: list[dict[str, Any]]) -> str:
+    labels = []
+    for hop in hops:
+        name = hop.get("device_name") or str(hop.get("device_id"))
+        ingress = hop.get("ingress_interface") or hop.get("ingress_logical_port")
+        egress = hop.get("egress_interface") or hop.get("egress_logical_port")
         labels.append(f"{name}({ingress}->{egress})")
     return " -> ".join(labels)
