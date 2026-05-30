@@ -18,6 +18,20 @@ class FieldSpec:
     scale: float | None = None
     enum: dict[int, str] | None = None
 
+    def as_dict(self) -> dict[str, Any]:
+        output: dict[str, Any] = {
+            "name": self.name,
+            "offset_bits": self.offset_bits,
+            "width_bits": self.width_bits,
+        }
+        if self.unit:
+            output["unit"] = self.unit
+        if self.scale is not None:
+            output["scale"] = self.scale
+        if self.enum:
+            output["enum"] = {str(key): value for key, value in self.enum.items()}
+        return output
+
 
 @dataclass(frozen=True)
 class MetadataSchema:
@@ -78,6 +92,17 @@ class MetadataSchema:
 
         return HopMetadata(raw=data, fields=output, schema_id=self.schema_id)
 
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.schema_id,
+            "vendor": self.vendor,
+            "ifa_version": self.ifa_version,
+            "gns": self.gns,
+            "lns": self.lns,
+            "hop_metadata_size": self.hop_metadata_size,
+            "fields": [field.as_dict() for field in self.fields],
+        }
+
 
 class SchemaRegistry:
     def __init__(self, schemas: list[MetadataSchema] | None = None):
@@ -85,6 +110,9 @@ class SchemaRegistry:
 
     def add(self, schema: MetadataSchema) -> None:
         self._schemas.append(schema)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"schemas": [schema.as_dict() for schema in self._schemas]}
 
     def match(self, ifa_version: int, gns: int, hop_data: bytes) -> MetadataSchema | None:
         for schema in self._schemas:

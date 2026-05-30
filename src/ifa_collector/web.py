@@ -450,6 +450,7 @@ INDEX_HTML = """<!doctype html>
     </section>
 
     <section id="errors">
+      <div class="panel"><h2>IFA Metadata Schemas</h2><div id="schemaTable"></div></div>
       <div class="panel"><h2>Unresolved Hops</h2><div id="unresolvedTable"></div></div>
       <div class="panel"><h2>Unresolved Record Detail</h2><div id="unresolvedRecordDetail" class="detail">Select an unresolved hop.</div></div>
       <div class="panel"><h2>Parse Errors</h2><div id="errorsTable"></div></div>
@@ -459,7 +460,7 @@ INDEX_HTML = """<!doctype html>
   <script>
     const state = {
       exporters: [], flows: [], paths: [], recentRecords: [], imports: [], errors: [], unresolved: [], topology: null, tam: null,
-      resolution: null,
+      resolution: null, schemas: [],
       devices: [], tamDeviceIndex: -1, tamSpec: emptyTamSpec(), tamTasks: [],
       collector: null, selectedTopologyNode: null, selectedPath: null, selectedPathDetail: null, selectedImportId: null,
       exporterFilter: '', flowFilter: '', pathFilter: '', recordFilter: ''
@@ -548,8 +549,8 @@ INDEX_HTML = """<!doctype html>
     }
     async function loadAll() {
       const importQuery = state.selectedImportId ? `&import_id=${encodeURIComponent(state.selectedImportId)}` : '';
-      const [exporters, flows, paths, recentRecords, imports, errors, unresolved, topology, collector, resolution] = await Promise.all([
-        api(`/api/exporters?${importQuery.slice(1)}`), api(`/api/flows?limit=100${importQuery}`), api(`/api/paths?limit=100${importQuery}`), api(`/api/recent-records?limit=10${importQuery}`), api('/api/imports?limit=10'), api(`/api/errors?limit=100${importQuery}`), api(`/api/unresolved-hops?limit=100${importQuery}`), api('/api/topology'), api('/api/collector/status'), api(`/api/resolution?${importQuery.slice(1)}`)
+      const [exporters, flows, paths, recentRecords, imports, errors, unresolved, topology, collector, resolution, schemas] = await Promise.all([
+        api(`/api/exporters?${importQuery.slice(1)}`), api(`/api/flows?limit=100${importQuery}`), api(`/api/paths?limit=100${importQuery}`), api(`/api/recent-records?limit=10${importQuery}`), api('/api/imports?limit=10'), api(`/api/errors?limit=100${importQuery}`), api(`/api/unresolved-hops?limit=100${importQuery}`), api('/api/topology'), api('/api/collector/status'), api(`/api/resolution?${importQuery.slice(1)}`), api('/api/schemas')
       ]);
       state.exporters = exporters.exporters;
       state.flows = flows.flows;
@@ -561,6 +562,7 @@ INDEX_HTML = """<!doctype html>
       state.topology = topology;
       state.collector = collector;
       state.resolution = resolution;
+      state.schemas = schemas.schemas || [];
       render();
     }
     function render() {
@@ -579,6 +581,7 @@ INDEX_HTML = """<!doctype html>
       renderImports();
       renderImportDetail();
       renderCollector();
+      renderSchemas();
     }
     function renderExporters() {
       const filtered = state.exporters.filter(e => rowMatches(e, state.exporterFilter, [
@@ -912,6 +915,29 @@ INDEX_HTML = """<!doctype html>
         <td>${esc(formatNsTime(e.last_seen_ns))}</td>
       </tr>`);
       document.getElementById('errorsTable').innerHTML = table(['Error', 'Occurrences', 'First Seen', 'Last Seen'], rows);
+    }
+    function renderSchemas() {
+      const schemaRows = (state.schemas || []).map(schema => `<tr>
+        <td><code>${esc(schema.id)}</code></td>
+        <td>${esc(schema.vendor)}</td>
+        <td>${esc(schema.ifa_version)}</td>
+        <td>${esc(schema.gns)}</td>
+        <td>${esc(schema.lns ?? 'any')}</td>
+        <td>${esc(schema.hop_metadata_size)}</td>
+        <td>${esc((schema.fields || []).length)}</td>
+      </tr>`);
+      const fieldRows = (state.schemas || []).flatMap(schema => (schema.fields || []).map(field => `<tr>
+        <td><code>${esc(schema.id)}</code></td>
+        <td><code>${esc(field.name)}</code></td>
+        <td>${esc(field.offset_bits)}</td>
+        <td>${esc(field.width_bits)}</td>
+        <td>${esc(field.unit || '-')}</td>
+        <td>${esc(field.enum ? Object.values(field.enum).join(', ') : '-')}</td>
+      </tr>`));
+      document.getElementById('schemaTable').innerHTML = `
+        ${table(['Schema', 'Vendor', 'IFA Version', 'GNS', 'LNS', 'Hop Bytes', 'Fields'], schemaRows)}
+        ${table(['Schema', 'Field', 'Offset Bits', 'Width Bits', 'Unit', 'Enum Labels'], fieldRows)}
+      `;
     }
     async function loadErrorDetail(errorText) {
       const importQuery = state.selectedImportId ? `&import_id=${encodeURIComponent(state.selectedImportId)}` : '';
@@ -1860,6 +1886,8 @@ def serve(db_path: Path, host: str, port: int, topology_path: Path | None = None
                     self._send_json(topology)
                 elif parsed.path == "/api/collector/status":
                     self._send_json(collector.status())
+                elif parsed.path == "/api/schemas":
+                    self._send_json(registry.as_dict())
                 elif parsed.path == "/api/db/stats":
                     store = SqliteStore(db_path)
                     try:
